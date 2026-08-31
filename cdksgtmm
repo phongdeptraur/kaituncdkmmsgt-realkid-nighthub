@@ -1,0 +1,2732 @@
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local cloneref = cloneref or function(o) return o end
+local Players = cloneref(game:GetService("Players"))
+local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
+local RunService = cloneref(game:GetService("RunService"))
+local TweenService = cloneref(game:GetService("TweenService"))
+local UserInputService = cloneref(game:GetService("UserInputService"))
+local CoreGui = cloneref(game:GetService("CoreGui"))
+local HttpService = cloneref(game:GetService("HttpService"))
+local TeleportService = cloneref(game:GetService("TeleportService"))
+
+local LocalPlayer = Players.LocalPlayer
+repeat task.wait() until LocalPlayer
+
+-- =========================================================================
+-- DỌN DẸP SẠCH SẼ CÁC BẢN UI CŨ TRÊN MỌI CONTAINER
+-- =========================================================================
+if getgenv()._AxiomTushitaMaster then
+    pcall(function() getgenv()._AxiomTushitaMaster:Unload() end)
+    task.wait(0.1)
+end
+
+local function PurgeExistingUI()
+    pcall(function()
+        if typeof(gethui) == "function" and gethui():FindFirstChild("AxiomTushitaMasterUI") then
+            gethui().AxiomTushitaMasterUI:Destroy()
+        end
+    end)
+    pcall(function()
+        if CoreGui:FindFirstChild("AxiomTushitaMasterUI") then
+            CoreGui.AxiomTushitaMasterUI:Destroy()
+        end
+    end)
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if pg and pg:FindFirstChild("AxiomTushitaMasterUI") then
+            pg.AxiomTushitaMasterUI:Destroy()
+        end
+    end)
+end
+PurgeExistingUI()
+
+local Engine = {
+    IsRunning = true,
+    FastAttackActive = true,
+    AttackRadius = 65,
+    TorchesFired = false,
+    NightHubRunning = false,
+    NightHubRaidFired = false,
+    RealkidRunning = false,
+    ActiveCDKMode = nil,
+    CurrentObjective = nil,
+    CurrentNightHubMode = nil,
+    IsTweening = false,
+    CurrentTween = nil,
+    AtMirrorPoint = false,
+    IsHopping = false,
+    InCDKMode = false,
+    ServerJoinTime = os.clock(),
+    CumulativeNearPlayerSeconds = 0,
+    LastHopFarmState = nil,
+    CachedTushitaProgress = {},
+    CDKBossStartTime = nil,
+    Connections = {},
+    Threads = {},
+    Instances = {}
+}
+getgenv()._AxiomTushitaMaster = Engine
+
+-- =========================================================================
+-- [BƯỚC 1] GIAO DIỆN HUD HIỂN THỊ TỨC THÌ (RADAR TIẾN TRÌNH & 6 NHIỆM VỤ CDK)
+-- =========================================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AxiomTushitaMasterUI"
+screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 999999999
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.IgnoreGuiInset = true
+screenGui.Enabled = true
+
+local function MountUI(gui)
+    local mounted = false
+    if typeof(gethui) == "function" then
+        pcall(function()
+            local target = gethui()
+            if target and typeof(target) == "Instance" then
+                gui.Parent = target
+                if gui.Parent == target then mounted = true end
+            end
+        end)
+    end
+
+    if not mounted then
+        if typeof(syn) == "table" and typeof(syn.protect_gui) == "function" then
+            pcall(syn.protect_gui, gui)
+        elseif typeof(protectgui) == "function" then
+            pcall(protectgui, gui)
+        end
+
+        pcall(function()
+            gui.Parent = CoreGui
+            if gui.Parent == CoreGui then mounted = true end
+        end)
+    end
+
+    if not mounted then
+        pcall(function()
+            local pg = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
+            if pg then
+                gui.Parent = pg
+                if gui.Parent == pg then mounted = true end
+            end
+        end)
+    end
+    return mounted
+end
+
+MountUI(screenGui)
+table.insert(Engine.Instances, screenGui)
+
+local mainCard = Instance.new("Frame", screenGui)
+mainCard.Name = "MainCard"
+mainCard.AnchorPoint = Vector2.new(0.5, 0)
+mainCard.Position = UDim2.new(0.5, 0, 0.05, 0)
+mainCard.Size = UDim2.new(0, 440, 0, 430)
+mainCard.BackgroundColor3 = Color3.fromRGB(13, 17, 24)
+mainCard.BackgroundTransparency = 0.04
+mainCard.BorderSizePixel = 0
+mainCard.ZIndex = 10
+mainCard.Visible = true
+Instance.new("UICorner", mainCard).CornerRadius = UDim.new(0, 10)
+
+local stroke = Instance.new("UIStroke", mainCard)
+stroke.Color = Color3.fromRGB(0, 200, 255)
+stroke.Thickness = 1.6
+
+local title = Instance.new("TextLabel", mainCard)
+title.Size = UDim2.new(0, 210, 0, 26)
+title.Position = UDim2.new(0, 12, 0, 6)
+title.BackgroundTransparency = 1
+title.Text = "AXIOM // UNIFIED CDK PIPELINE"
+title.TextColor3 = Color3.fromRGB(0, 220, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 13
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 11
+
+local function EnableDrag(frame, handle)
+    handle = handle or frame
+    local dragging = false
+    local mousePos, framePos
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            mousePos = input.Position
+            framePos = frame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    local dragConn = UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - mousePos
+            frame.Position = UDim2.new(
+                framePos.X.Scale,
+                framePos.X.Offset + delta.X,
+                framePos.Y.Scale,
+                framePos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    table.insert(Engine.Connections, dragConn)
+end
+
+EnableDrag(mainCard, title)
+EnableDrag(mainCard, mainCard)
+
+-- BADGE FAST ATTACK
+local fastAttackBadge = Instance.new("TextLabel", mainCard)
+fastAttackBadge.Size = UDim2.new(0, 95, 0, 18)
+fastAttackBadge.Position = UDim2.new(1, -215, 0, 8)
+fastAttackBadge.BackgroundColor3 = Color3.fromRGB(22, 55, 35)
+fastAttackBadge.Text = "FAST ATK: 1:1"
+fastAttackBadge.TextColor3 = Color3.fromRGB(80, 255, 140)
+fastAttackBadge.Font = Enum.Font.SourceSansBold
+fastAttackBadge.TextSize = 11
+fastAttackBadge.ZIndex = 11
+Instance.new("UICorner", fastAttackBadge).CornerRadius = UDim.new(0, 4)
+
+-- BADGE ĐỘC LẬP CHO ĐỒNG HỒ SERVER 20 PHÚT
+local timerBadge = Instance.new("TextLabel", mainCard)
+timerBadge.Size = UDim2.new(0, 105, 0, 18)
+timerBadge.Position = UDim2.new(1, -114, 0, 8)
+timerBadge.BackgroundColor3 = Color3.fromRGB(25, 35, 55)
+timerBadge.Text = "⏰ 00:00 / 20:00"
+timerBadge.TextColor3 = Color3.fromRGB(0, 220, 255)
+timerBadge.Font = Enum.Font.SourceSansBold
+timerBadge.TextSize = 11
+timerBadge.ZIndex = 11
+Instance.new("UICorner", timerBadge).CornerRadius = UDim.new(0, 4)
+
+local radarBox = Instance.new("Frame", mainCard)
+radarBox.Size = UDim2.new(1, -24, 0, 305)
+radarBox.Position = UDim2.new(0, 12, 0, 36)
+radarBox.BackgroundColor3 = Color3.fromRGB(20, 26, 38)
+radarBox.ZIndex = 11
+Instance.new("UICorner", radarBox).CornerRadius = UDim.new(0, 8)
+
+-- 1. BỘ NHÃN RADAR BAN ĐẦU (ASSET RADAR)
+local lblTushitaItem = Instance.new("TextLabel", radarBox)
+lblTushitaItem.Size = UDim2.new(1, -16, 0, 18)
+lblTushitaItem.Position = UDim2.new(0, 8, 0, 3)
+lblTushitaItem.BackgroundTransparency = 1
+lblTushitaItem.Text = "Kiếm Tushita: Đang kiểm tra..."
+lblTushitaItem.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblTushitaItem.Font = Enum.Font.SourceSansBold
+lblTushitaItem.TextSize = 12
+lblTushitaItem.TextXAlignment = Enum.TextXAlignment.Left
+lblTushitaItem.ZIndex = 12
+
+local lblYamaItem = Instance.new("TextLabel", radarBox)
+lblYamaItem.Size = UDim2.new(1, -16, 0, 18)
+lblYamaItem.Position = UDim2.new(0, 8, 0, 21)
+lblYamaItem.BackgroundTransparency = 1
+lblYamaItem.Text = "Kiếm Yama: Đang kiểm tra..."
+lblYamaItem.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblYamaItem.Font = Enum.Font.SourceSansBold
+lblYamaItem.TextSize = 12
+lblYamaItem.TextXAlignment = Enum.TextXAlignment.Left
+lblYamaItem.ZIndex = 12
+
+local lblValkyrieItem = Instance.new("TextLabel", radarBox)
+lblValkyrieItem.Size = UDim2.new(1, -16, 0, 18)
+lblValkyrieItem.Position = UDim2.new(0, 8, 0, 39)
+lblValkyrieItem.BackgroundTransparency = 1
+lblValkyrieItem.Text = "Valkyrie Helm: Đang kiểm tra..."
+lblValkyrieItem.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblValkyrieItem.Font = Enum.Font.SourceSansBold
+lblValkyrieItem.TextSize = 12
+lblValkyrieItem.TextXAlignment = Enum.TextXAlignment.Left
+lblValkyrieItem.ZIndex = 12
+
+local lblFractalItem = Instance.new("TextLabel", radarBox)
+lblFractalItem.Size = UDim2.new(1, -16, 0, 18)
+lblFractalItem.Position = UDim2.new(0, 8, 0, 57)
+lblFractalItem.BackgroundTransparency = 1
+lblFractalItem.Text = "Mirror Fractal: Đang kiểm tra..."
+lblFractalItem.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblFractalItem.Font = Enum.Font.SourceSansBold
+lblFractalItem.TextSize = 12
+lblFractalItem.TextXAlignment = Enum.TextXAlignment.Left
+lblFractalItem.ZIndex = 12
+
+local lblGate = Instance.new("TextLabel", radarBox)
+lblGate.Size = UDim2.new(1, -16, 0, 18)
+lblGate.Position = UDim2.new(0, 8, 0, 75)
+lblGate.BackgroundTransparency = 1
+lblGate.Text = "Cổng Tushita: Đang kiểm tra..."
+lblGate.TextColor3 = Color3.fromRGB(200, 210, 220)
+lblGate.Font = Enum.Font.SourceSans
+lblGate.TextSize = 12
+lblGate.TextXAlignment = Enum.TextXAlignment.Left
+lblGate.ZIndex = 12
+
+local lblIndra = Instance.new("TextLabel", radarBox)
+lblIndra.Size = UDim2.new(1, -16, 0, 18)
+lblIndra.Position = UDim2.new(0, 8, 0, 93)
+lblIndra.BackgroundTransparency = 1
+lblIndra.Text = "rip_indra: Đang quét server..."
+lblIndra.TextColor3 = Color3.fromRGB(200, 210, 220)
+lblIndra.Font = Enum.Font.SourceSans
+lblIndra.TextSize = 12
+lblIndra.TextXAlignment = Enum.TextXAlignment.Left
+lblIndra.ZIndex = 12
+
+local lblDough = Instance.new("TextLabel", radarBox)
+lblDough.Size = UDim2.new(1, -16, 0, 18)
+lblDough.Position = UDim2.new(0, 8, 0, 111)
+lblDough.BackgroundTransparency = 1
+lblDough.Text = "Dough King: Đang quét server..."
+lblDough.TextColor3 = Color3.fromRGB(200, 210, 220)
+lblDough.Font = Enum.Font.SourceSans
+lblDough.TextSize = 12
+lblDough.TextXAlignment = Enum.TextXAlignment.Left
+lblDough.ZIndex = 12
+
+local lblTorch = Instance.new("TextLabel", radarBox)
+lblTorch.Size = UDim2.new(1, -16, 0, 18)
+lblTorch.Position = UDim2.new(0, 8, 0, 129)
+lblTorch.BackgroundTransparency = 1
+lblTorch.Text = "Holy Torch: Tự động nã 5 đuốc khi có sẵn"
+lblTorch.TextColor3 = Color3.fromRGB(200, 210, 220)
+lblTorch.Font = Enum.Font.SourceSans
+lblTorch.TextSize = 12
+lblTorch.TextXAlignment = Enum.TextXAlignment.Left
+lblTorch.ZIndex = 12
+
+local lblPlayerTracker = Instance.new("TextLabel", radarBox)
+lblPlayerTracker.Size = UDim2.new(1, -16, 0, 18)
+lblPlayerTracker.Position = UDim2.new(0, 8, 0, 147)
+lblPlayerTracker.BackgroundTransparency = 1
+lblPlayerTracker.Text = "Người chơi gần: ⚪ Tắt (Chỉ bật khi Farm Mastery)"
+lblPlayerTracker.TextColor3 = Color3.fromRGB(160, 170, 180)
+lblPlayerTracker.Font = Enum.Font.SourceSansBold
+lblPlayerTracker.TextSize = 12
+lblPlayerTracker.TextXAlignment = Enum.TextXAlignment.Left
+lblPlayerTracker.ZIndex = 12
+
+-- 2. BỘ NHÃN 6 NHIỆM VỤ CURSED DUAL KATANA (CDK)
+local lblCDKHeader = Instance.new("TextLabel", radarBox)
+lblCDKHeader.Size = UDim2.new(1, -16, 0, 18)
+lblCDKHeader.Position = UDim2.new(0, 8, 0, 3)
+lblCDKHeader.BackgroundTransparency = 1
+lblCDKHeader.Text = "⚔️ TIẾN TRÌNH 6 NHIỆM VỤ CURSED DUAL KATANA (CDK):"
+lblCDKHeader.TextColor3 = Color3.fromRGB(255, 215, 0)
+lblCDKHeader.Font = Enum.Font.SourceSansBold
+lblCDKHeader.TextSize = 12
+lblCDKHeader.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKHeader.ZIndex = 12
+lblCDKHeader.Visible = false
+
+local lblCDKYama1 = Instance.new("TextLabel", radarBox)
+lblCDKYama1.Size = UDim2.new(1, -16, 0, 18)
+lblCDKYama1.Position = UDim2.new(0, 8, 0, 22)
+lblCDKYama1.BackgroundTransparency = 1
+lblCDKYama1.Text = "1. Yama: Đau Đớn (Pain & Suffering): ⚪"
+lblCDKYama1.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblCDKYama1.Font = Enum.Font.SourceSansBold
+lblCDKYama1.TextSize = 11
+lblCDKYama1.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKYama1.ZIndex = 12
+lblCDKYama1.Visible = false
+
+local lblCDKYama2 = Instance.new("TextLabel", radarBox)
+lblCDKYama2.Size = UDim2.new(1, -16, 0, 18)
+lblCDKYama2.Position = UDim2.new(0, 8, 0, 40)
+lblCDKYama2.BackgroundTransparency = 1
+lblCDKYama2.Text = "2. Yama: Sương Mù (Haze of Misery): ⚪"
+lblCDKYama2.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblCDKYama2.Font = Enum.Font.SourceSansBold
+lblCDKYama2.TextSize = 11
+lblCDKYama2.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKYama2.ZIndex = 12
+lblCDKYama2.Visible = false
+
+local lblCDKYama3 = Instance.new("TextLabel", radarBox)
+lblCDKYama3.Size = UDim2.new(1, -16, 0, 18)
+lblCDKYama3.Position = UDim2.new(0, 8, 0, 58)
+lblCDKYama3.BackgroundTransparency = 1
+lblCDKYama3.Text = "3. Yama: Tử Thần (Fear the Reaper): ⚪"
+lblCDKYama3.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblCDKYama3.Font = Enum.Font.SourceSansBold
+lblCDKYama3.TextSize = 11
+lblCDKYama3.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKYama3.ZIndex = 12
+lblCDKYama3.Visible = false
+
+local lblCDKTushita1 = Instance.new("TextLabel", radarBox)
+lblCDKTushita1.Size = UDim2.new(1, -16, 0, 18)
+lblCDKTushita1.Position = UDim2.new(0, 8, 0, 76)
+lblCDKTushita1.BackgroundTransparency = 1
+lblCDKTushita1.Text = "4. Tushita: Thuyền Trưởng (Dokkan): ⚪"
+lblCDKTushita1.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblCDKTushita1.Font = Enum.Font.SourceSansBold
+lblCDKTushita1.TextSize = 11
+lblCDKTushita1.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKTushita1.ZIndex = 12
+lblCDKTushita1.Visible = false
+
+local lblCDKTushita2 = Instance.new("TextLabel", radarBox)
+lblCDKTushita2.Size = UDim2.new(1, -16, 0, 18)
+lblCDKTushita2.Position = UDim2.new(0, 8, 0, 94)
+lblCDKTushita2.BackgroundTransparency = 1
+lblCDKTushita2.Text = "5. Tushita: Đột Kích Lâu Đài (With the Wind): ⚪"
+lblCDKTushita2.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblCDKTushita2.Font = Enum.Font.SourceSansBold
+lblCDKTushita2.TextSize = 11
+lblCDKTushita2.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKTushita2.ZIndex = 12
+lblCDKTushita2.Visible = false
+
+local lblCDKTushita3 = Instance.new("TextLabel", radarBox)
+lblCDKTushita3.Size = UDim2.new(1, -16, 0, 18)
+lblCDKTushita3.Position = UDim2.new(0, 8, 0, 112)
+lblCDKTushita3.BackgroundTransparency = 1
+lblCDKTushita3.Text = "6. Tushita: Nữ Hoàng Bánh (Soulless): ⚪"
+lblCDKTushita3.TextColor3 = Color3.fromRGB(255, 255, 255)
+lblCDKTushita3.Font = Enum.Font.SourceSansBold
+lblCDKTushita3.TextSize = 11
+lblCDKTushita3.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKTushita3.ZIndex = 12
+lblCDKTushita3.Visible = false
+
+local lblCDKBoss = Instance.new("TextLabel", radarBox)
+lblCDKBoss.Size = UDim2.new(1, -16, 0, 18)
+lblCDKBoss.Position = UDim2.new(0, 8, 0, 130)
+lblCDKBoss.BackgroundTransparency = 1
+lblCDKBoss.Text = "👑 Cursed Skeleton Boss (Lấy CDK): ⚪ Đang chờ hoàn thành"
+lblCDKBoss.TextColor3 = Color3.fromRGB(255, 180, 50)
+lblCDKBoss.Font = Enum.Font.SourceSansBold
+lblCDKBoss.TextSize = 11
+lblCDKBoss.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKBoss.ZIndex = 12
+lblCDKBoss.Visible = false
+
+-- 3. BỘ CẢM BIẾN REAL-TIME 3 MỤC TIÊU CDK (SOUL REAPER, CAKE QUEEN, PIRATE RAID)
+local lblCDKSoulReaper = Instance.new("TextLabel", radarBox)
+lblCDKSoulReaper.Size = UDim2.new(1, -16, 0, 17)
+lblCDKSoulReaper.Position = UDim2.new(0, 8, 0, 149)
+lblCDKSoulReaper.BackgroundTransparency = 1
+lblCDKSoulReaper.Text = "👻 Soul Reaper (Yama 3): ⚪ Đang quét..."
+lblCDKSoulReaper.TextColor3 = Color3.fromRGB(200, 180, 255)
+lblCDKSoulReaper.Font = Enum.Font.SourceSansBold
+lblCDKSoulReaper.TextSize = 11
+lblCDKSoulReaper.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKSoulReaper.ZIndex = 12
+lblCDKSoulReaper.Visible = false
+
+local lblCDKCakeQueen = Instance.new("TextLabel", radarBox)
+lblCDKCakeQueen.Size = UDim2.new(1, -16, 0, 17)
+lblCDKCakeQueen.Position = UDim2.new(0, 8, 0, 167)
+lblCDKCakeQueen.BackgroundTransparency = 1
+lblCDKCakeQueen.Text = "🍰 Cake Queen (Tushita 3): ⚪ Đang quét..."
+lblCDKCakeQueen.TextColor3 = Color3.fromRGB(255, 180, 210)
+lblCDKCakeQueen.Font = Enum.Font.SourceSansBold
+lblCDKCakeQueen.TextSize = 11
+lblCDKCakeQueen.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKCakeQueen.ZIndex = 12
+lblCDKCakeQueen.Visible = false
+
+local lblCDKCastleRaid = Instance.new("TextLabel", radarBox)
+lblCDKCastleRaid.Size = UDim2.new(1, -16, 0, 17)
+lblCDKCastleRaid.Position = UDim2.new(0, 8, 0, 185)
+lblCDKCastleRaid.BackgroundTransparency = 1
+lblCDKCastleRaid.Text = "🏰 Castle Pirate Raid (Tushita 2): ⚪ Đang quét..."
+lblCDKCastleRaid.TextColor3 = Color3.fromRGB(255, 210, 130)
+lblCDKCastleRaid.Font = Enum.Font.SourceSansBold
+lblCDKCastleRaid.TextSize = 11
+lblCDKCastleRaid.TextXAlignment = Enum.TextXAlignment.Left
+lblCDKCastleRaid.ZIndex = 12
+lblCDKCastleRaid.Visible = false
+
+local lblStatus = Instance.new("TextLabel", radarBox)
+lblStatus.Size = UDim2.new(1, -16, 0, 95)
+lblStatus.Position = UDim2.new(0, 8, 0, 204)
+lblStatus.BackgroundTransparency = 1
+lblStatus.Text = "Trạng thái: 🟢 Radar đang khởi động..."
+lblStatus.TextColor3 = Color3.fromRGB(0, 200, 255)
+lblStatus.Font = Enum.Font.SourceSansBold
+lblStatus.TextSize = 12
+lblStatus.TextWrapped = true
+lblStatus.TextXAlignment = Enum.TextXAlignment.Left
+lblStatus.ZIndex = 12
+
+local btnHopLowServer = Instance.new("TextButton", mainCard)
+btnHopLowServer.Size = UDim2.new(1, -24, 0, 32)
+btnHopLowServer.Position = UDim2.new(0, 12, 0, 348)
+btnHopLowServer.BackgroundColor3 = Color3.fromRGB(30, 100, 180)
+btnHopLowServer.Text = "🌐 HOP LOW SERVER (≤ 8 PLAYERS)"
+btnHopLowServer.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnHopLowServer.Font = Enum.Font.SourceSansBold
+btnHopLowServer.TextSize = 13
+btnHopLowServer.ZIndex = 11
+Instance.new("UICorner", btnHopLowServer).CornerRadius = UDim.new(0, 6)
+
+local btnUnload = Instance.new("TextButton", mainCard)
+btnUnload.Size = UDim2.new(1, -24, 0, 30)
+btnUnload.Position = UDim2.new(0, 12, 0, 386)
+btnUnload.BackgroundColor3 = Color3.fromRGB(170, 40, 40)
+btnUnload.Text = "DỪNG & UNLOAD SCRIPT AXIOM"
+btnUnload.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnUnload.Font = Enum.Font.SourceSansBold
+btnUnload.TextSize = 12
+btnUnload.ZIndex = 11
+Instance.new("UICorner", btnUnload).CornerRadius = UDim.new(0, 6)
+
+local function SwitchUIToCDKMode()
+    if Engine.InCDKMode then return end
+    Engine.InCDKMode = true
+
+    lblTushitaItem.Visible = false
+    lblYamaItem.Visible = false
+    lblValkyrieItem.Visible = false
+    lblFractalItem.Visible = false
+    lblGate.Visible = false
+    lblIndra.Visible = false
+    lblDough.Visible = false
+    lblTorch.Visible = false
+    lblPlayerTracker.Visible = false
+
+    lblCDKHeader.Visible = true
+    lblCDKYama1.Visible = true
+    lblCDKYama2.Visible = true
+    lblCDKYama3.Visible = true
+    lblCDKTushita1.Visible = true
+    lblCDKTushita2.Visible = true
+    lblCDKTushita3.Visible = true
+    lblCDKBoss.Visible = true
+    lblCDKSoulReaper.Visible = true
+    lblCDKCakeQueen.Visible = true
+    lblCDKCastleRaid.Visible = true
+end
+
+-- =========================================================================
+-- [BƯỚC 2] TỰ ĐỘNG CHỌN PHE MARINES TRÊN MỌI SEA (ĐỂ NHÂN VẬT SPAWN & LOAD)
+-- =========================================================================
+local function AutoSelectMarinesTeam()
+    local attempts = 30
+    while attempts > 0 and (not LocalPlayer.Team or LocalPlayer.Team.Name ~= "Marines") do
+        pcall(function()
+            local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+            local commF = remotes and remotes:FindFirstChild("CommF_")
+            if commF then commF:InvokeServer("SetTeam", "Marines") end
+
+            local pg = LocalPlayer:FindFirstChild("PlayerGui")
+            if pg then
+                local chooseTeam = pg:FindFirstChild("ChooseTeam") or (pg:FindFirstChild("Main") and pg.Main:FindFirstChild("ChooseTeam"))
+                if chooseTeam then
+                    local mBtn = chooseTeam:FindFirstChild("Marines", true) or chooseTeam:FindFirstChild("Marine", true)
+                    if mBtn and mBtn:IsA("GuiButton") and getconnections then
+                        for _, c in ipairs(getconnections(mBtn.MouseButton1Click or mBtn.Activated)) do c:Fire() end
+                    end
+                end
+            end
+        end)
+        if LocalPlayer.Team and LocalPlayer.Team.Name == "Marines" then break end
+        attempts = attempts - 1
+        task.wait(0.3)
+    end
+end
+
+task.spawn(AutoSelectMarinesTeam)
+
+-- =========================================================================
+-- [BƯỚC 3] NHẬN DIỆN SEA 3 QUA PLACE ID CHUẨN (100117331123089 / 7449423635)
+-- =========================================================================
+local function DetectIsSea3()
+    if game.PlaceId == 100117331123089 or game.PlaceId == 7449423635 then
+        return true
+    end
+    return false
+end
+
+if not DetectIsSea3() then
+    task.spawn(function()
+        lblStatus.Text = "Trạng thái: ⚠️ Đang ở Sea khác! Đang tự động chọn phe Marines..."
+        AutoSelectMarinesTeam()
+
+        lblStatus.Text = "Trạng thái: ⚠️ Đang ở Sea khác! Đang đợi nhân vật xuất hiện..."
+        repeat task.wait(0.2) until LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+        for remaining = 5, 1, -1 do
+            lblStatus.Text = string.format("Trạng thái: ⏳ Đang ở Sea khác! Đợi %d giây rồi dịch chuyển sang Sea 3...", remaining)
+            task.wait(1)
+        end
+
+        lblStatus.Text = "Trạng thái: 🚀 Đang dịch chuyển sang Sea 3 (TravelZou)..."
+        pcall(function()
+            game.ReplicatedStorage.Remotes.CommF_:InvokeServer("TravelZou")
+        end)
+    end)
+    return
+else
+    lblStatus.Text = "Trạng thái: 🟢 Đã xác nhận Sea 3! Đang quét kho đồ & phân tích mục tiêu..."
+end
+
+-- =========================================================================
+-- [BƯỚC 4] KIỂM TRA & TỰ ĐIỀN KEY NIGHT HUB (NightHubKey.bin)
+-- =========================================================================
+local EXPECTED_NIGHT_KEY = "NightHub_c5Rz2UiC1t8E"
+local NIGHT_KEY_FILENAME = "NightHubKey.bin"
+
+local function EnsureNightHubKey()
+    pcall(function()
+        local needsWrite = true
+        if isfile and isfile(NIGHT_KEY_FILENAME) and readfile then
+            local existing = readfile(NIGHT_KEY_FILENAME)
+            if existing and existing == EXPECTED_NIGHT_KEY then
+                needsWrite = false
+            end
+        end
+
+        if needsWrite and writefile then
+            writefile(NIGHT_KEY_FILENAME, EXPECTED_NIGHT_KEY)
+            warn("[AXIOM KEY] Đã tự động tạo và ghi NightHubKey.bin chính xác!")
+        end
+    end)
+end
+
+EnsureNightHubKey()
+
+-- =========================================================================
+-- [BƯỚC 5] AXIOM HEADLESS LOW-PLAYER SERVER HOP ENGINE
+-- =========================================================================
+local HopCFG = {
+    MaxPages       = 100,
+    MaxPlayers     = 8,
+    PageRetries    = 3,
+    PageStartDelay = 0.02,
+    RetryDelay     = 0.2,
+    ScanTimeout    = 8,
+    BrowserWait    = 1.25,
+    TeleportWait   = 6
+}
+
+local VisitedServers = {}
+local TP = { StartedAt = 0, FailedAt = 0, Failure = "" }
+
+local tpInitConn = TeleportService.TeleportInitFailed:Connect(function(player, result, message)
+    if player ~= LocalPlayer then return end
+    TP.FailedAt = os.clock()
+    TP.Failure = tostring(result and result.Name or result) .. " | " .. tostring(message or "")
+end)
+table.insert(Engine.Connections, tpInitConn)
+
+local tpStateConn = LocalPlayer.OnTeleport:Connect(function(state)
+    local name = ""
+    pcall(function() name = state.Name end)
+    if name == "Failed" then
+        TP.FailedAt = os.clock()
+        TP.Failure = "OnTeleport: Failed"
+    else
+        TP.StartedAt = os.clock()
+    end
+end)
+table.insert(Engine.Connections, tpStateConn)
+
+local function ScanBrowserPages()
+    local browser = ReplicatedStorage:FindFirstChild("__ServerBrowser")
+    if not browser then return nil end
+
+    local byJob = {}
+    local completed = 0
+
+    for page = 1, HopCFG.MaxPages do
+        task.delay((page - 1) * HopCFG.PageStartDelay, function()
+            local servers
+            for attempt = 1, HopCFG.PageRetries do
+                local ok, result = pcall(function() return browser:InvokeServer(page) end)
+                if ok and type(result) == "table" then
+                    servers = result
+                    break
+                end
+                if attempt < HopCFG.PageRetries then task.wait(HopCFG.RetryDelay) end
+            end
+
+            if type(servers) == "table" then
+                for jobId, data in pairs(servers) do
+                    if type(data) == "table" then
+                        local count = tonumber(data.Count) or 99
+                        local id = tostring(jobId)
+                        if id ~= tostring(game.JobId) and not table.find(VisitedServers, id) and count <= HopCFG.MaxPlayers then
+                            local oldData = byJob[id]
+                            if not oldData or count < oldData.Count then
+                                byJob[id] = { JobId = id, Count = count, Region = tostring(data.Region or "Unknown") }
+                            end
+                        end
+                    end
+                end
+            end
+            completed = completed + 1
+        end)
+    end
+
+    local deadline = os.clock() + HopCFG.ScanTimeout
+    repeat task.wait(0.03) until completed >= HopCFG.MaxPages or os.clock() >= deadline
+
+    local pool = {}
+    for _, server in pairs(byJob) do pool[#pool + 1] = server end
+
+    table.sort(pool, function(a, b)
+        if a.Count == b.Count then return a.JobId < b.JobId end
+        return a.Count < b.Count
+    end)
+    return pool
+end
+
+local function WaitTeleportState(duration)
+    local deadline = os.clock() + duration
+    repeat
+        if TP.FailedAt > 0 then return "failed" end
+        if TP.StartedAt > 0 then return "started" end
+        task.wait(0.05)
+    until os.clock() >= deadline
+    return "timeout"
+end
+
+local function AttemptServerJoin(server)
+    TP.StartedAt = 0
+    TP.FailedAt = 0
+    TP.Failure = ""
+
+    table.insert(VisitedServers, server.JobId)
+    warn(string.format("[AXIOM HOP] Đang kết nối Server Job: %s (Người chơi: %d)...", server.JobId, server.Count))
+
+    local browser = ReplicatedStorage:FindFirstChild("__ServerBrowser")
+    local invoked = false
+    if browser then
+        invoked = pcall(function() browser:InvokeServer("teleport", server.JobId) end)
+    end
+
+    local state
+    if invoked then state = WaitTeleportState(HopCFG.BrowserWait) end
+
+    if not invoked or state ~= "started" then
+        if state == "failed" then return false end
+        local ok = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, server.JobId, LocalPlayer)
+        end)
+        if not ok then return false end
+        state = WaitTeleportState(HopCFG.TeleportWait)
+    end
+
+    if state == "started" then
+        warn("[AXIOM HOP] Đang chuyển server...")
+        local deadline = os.clock() + 10
+        repeat
+            if TP.FailedAt > 0 then return false end
+            task.wait(0.1)
+        until os.clock() >= deadline
+    end
+    return false
+end
+
+function Engine:HopLowServer()
+    if self.IsHopping then return end
+    self.IsHopping = true
+    lblStatus.Text = "Trạng thái: 🌐 Đang quét tìm Low Server (≤ 8 players)..."
+
+    task.spawn(function()
+        while Engine.IsRunning and Engine.IsHopping do
+            local pool = ScanBrowserPages()
+            if pool and #pool > 0 then
+                lblStatus.Text = string.format("Trạng thái: 🌐 Tìm thấy %d server ít người! Đang vào...", #pool)
+                for _, server in ipairs(pool) do
+                    local ok = AttemptServerJoin(server)
+                    if ok then break end
+                    task.wait(0.5)
+                end
+            else
+                lblStatus.Text = "Trạng thái: 🌐 Quét Roblox Public API tìm server ít người..."
+                local okApi, response = pcall(function()
+                    local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100", game.PlaceId)
+                    return game:HttpGet(url)
+                end)
+
+                if okApi and response then
+                    local okJson, data = pcall(function() return HttpService:JSONDecode(response) end)
+                    if okJson and data and data.data then
+                        for _, sData in ipairs(data.data) do
+                            if sData.playing and sData.playing <= HopCFG.MaxPlayers and tostring(sData.id) ~= tostring(game.JobId) and not table.find(VisitedServers, tostring(sData.id)) then
+                                AttemptServerJoin({ JobId = tostring(sData.id), Count = sData.playing })
+                                task.wait(0.5)
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(1.5)
+        end
+    end)
+end
+
+btnHopLowServer.MouseButton1Click:Connect(function()
+    Engine:HopLowServer()
+end)
+
+-- =========================================================================
+-- [BƯỚC 6] TỌA ĐỘ CHIẾN LƯỢC CAKE LOAF, GƯƠNG, HAUNTED & SUBMERGED ISLAND
+-- =========================================================================
+local POS_CAKE_LOAF = Vector3.new(-1990.45, 37.86, -11905.37)
+local POS_MIRROR = Vector3.new(-2136.14, 70.05, -12405.50)
+local POS_HAUNTED_CASTLE = Vector3.new(-9515, 164, 5786)
+local NEAR_CAKE_LOAF_RADIUS = 1200
+
+local POS_SUBMERGED_ISLAND = Vector3.new(11220.95, -2128.64, 9874.74)
+local SUBMERGED_ISLAND_RADIUS = 4000
+
+-- =========================================================================
+-- [BƯỚC 7] CẤU HÌNH REALKID HUB & NIGHT HUB
+-- =========================================================================
+local REALKID_CONFIG_BERRY = [[{"WalkSpeedSlider":100,"EspSeaEventIsland":false,"UpgradeDragonTalon":false,"ChangeTransparencyCanSee":false,"LeviathanMultiCannon":false,"GoToSharkmanNPC":false,"ValueDamageMultiSegments":30000,"AutoStartRaid":false,"AutoTrainV4":false,"SpectatePlayer":false,"AutoMelee":false,"SelectBoatTarget":"My Boat","farm_m1_gun_sea":false,"DungeonAccountStart":false,"global_skill_hold_c":10,"AutoV3Target_Toggle":false,"selected_fighting_style":"Black Leg","ResetAfterTrial":false,"AutoFindKitsuneIsland":false,"AutoCollectGear":false,"RemoveDeathRespawnVFX":false,"AutoTpAncientClock":false,"AutoSwords":false,"EspIslandLocation":false,"AutoEliteQuest":false,"AutoDojoTrainer":false,"AutoDracoFully":false,"BaitSelection":"Basic Bait","auto_pirate_raid":false,"auto_farm_sea_event":false,"AutoAwakening":false,"AutoSlapDodgeAABB":false,"EspChests":false,"ChooseSeaLevel":"Lv 1","AzureEmberToTrade":1,"AutoTpAncientOne":false,"Berry":true,"AutoHopChest":false,"AutoLookAtMoon":false,"card_selection":[],"EspAdvancedFruitsDealer":false,"autotwfruits":false,"AcceptRainbowQuest":false,"AutoCollectDragonEggs":false,"AutoYamaCDK":false,"auto_zou_quest":false,"AutoFarmObservationHop":false,"auto_dragon_hunter":false,"MasterySword":false,"global_skill_hold_z":10,"AutoPhoenixDungeon":false,"AutoOpenMenuHopFarm":false,"AutoPickDungeonCards":false,"EspAuraColourDealers":false,"RaceV4Aura":false,"global_skill_hold_x":10,"AutoResetWhenCompleteVolcano":false,"AutoValkyrie":false,"AutoRelicDragoTrial":false,"AutoTrainDragoV4":false,"EspGears":false,"AutoTushitaSword":false,"global_skill_keys":["Z","X","C"],"AutoDriveToHydraIsland":false,"auto_buy_style":false,"auto_farm_materials":false,"JumpPower":false,"AutoBuyV4Gear":false,"discord_notice_mirage":false,"DungeonAutoJoin":false,"SelectTravel":"Submerged Island","AutoEscapeRoughSea":false,"SelectPortal":"Castle On The Sea","global_skill_delay":100,"AutoCollectAzureEmber":false,"discord_notice_prehistoric":false,"AutoStackDarkbeard":false,"AutoChooseV4Gear":false,"RemoveHitVFX":false,"auto_farm_general":false,"AntiAFK":true,"SafeMode":false,"RandomAround":false,"WalkSpeed":false,"AutoDefense":false,"HopBerry":false,"AutoSerpentBow":false,"TweenToDragoTrials":false,"FarmMastery_G":false,"auto_patch_prehistoric":false,"AutoFindPrehistoricIsland":false,"RaceV3Aura":false,"accept_quests":false,"Chest":false,"auto_citizen_quest":false,"AutoTravel":false,"AutoCanvendishSword":false,"raidnew":false,"AutoTweenHighestPoint":false,"BusuAura":true,"AutoTradeAzureEmber":false,"autoshootgun":true,"MagicFruits":false,"Initialize":true,"AutoPrayGravestone":false,"Bringmob":true,"toggle_portal_tp":true,"auto_farm_nearest":false,"AutoDragoV2":false,"AutoRemoveSkyFog":false,"StopWhenChalice":true,"global_skill_hold_v":10,"BringMode":"400","auto_farm_tyrant":false,"BringMobMax":"6","toggle_bypass_tp":true,"auto_factory_raid":false,"global_skill_hold_f":10,"AutoBuyChipFruit":false,"TweenSpeedNewZ":280,"AutoGetCDK":false,"EspPlayers":false,"weapon_choice":"Melee","AutoSkullGuitar":false,"discord_notice_frozen":false,"auto_training_dummy":false,"farm_height":35,"EspFruits":false,"AutoSelectDungeon":false,"AutoFireShootHeartLeviathan":false,"AttackMultiSegmentsLeviathan":false,"auto_farm_leviathan":false,"AutoRainbowColors":false,"AutoCompleteTrialRace":false,"AutoSoulReaper":false,"AutoUnlockedPuzzle":false,"AutoFindLeviathan":false,"AutoYamaSword":false,"farm_m1_fruit_sea":false,"selected_sea_events":[],"AutoTeleportToShrineActived":false,"attack_method_golem":"Attack","tocdothuyen":"200","AutoBuyFruitsFlag":false,"AutoStoreFruitFlag":false,"MaxChestHop":45,"ChooseBoats":"MarineGrandBrigade","ResetVolcanoAfterCollectingLoot":false,"DungeonMinPlayers":2,"AutoBigmom":false,"AutoCollectDinoBones":false,"AutoSailBoat":false,"AutoCraftVolcanicMagnet":false,"AutoDragoV3":false,"DungeonDifficulty":"Normal","AutoPullLever":false,"AutoRandomBones":false,"JumpPowerSlider":50,"global_skill_weapons":["Melee"],"AutoTeleportFrozenDimension":false,"AutoUnlockDoughDungeon":false,"AutoFarmMaterialSkullGuitar":false,"EspBerries":false,"auto_mastery_fruits":false,"AutoTryLuck":false,"AutoDragoV1":false,"AutoLeiAccessory":false,"AutoTeleportBarista":false,"selected_farm_target":"Bones","AutoTweenAdvancedFruitDealer":false,"AutoFindMirageIsland":false,"AutoBloxFruit":false,"AutoObservationV2":false,"auto_travel_dressrosa":false,"AutoGun":false,"AutoMirror":false,"AutoCollectMirageChest":false,"AutoBossToggle":false,"AutoDriveToTikiOutport":false,"AutoFarmObservation":false,"KenAura":true,"mastery_health_percent":"30%","AutoSpawnRipIndra":false,"TeleportToPlayer":false,"hopantirs":false,"AutoTwinHooks":false,"auto_break_bottle":false,"RodSelection":"Fishing Rod","mastery_island_choice":"Cake","DisableNotify":false,"AutoKillPlayerAfterTrial":false,"AutoTushitaCDK":false,"SwapDragoRace":false,"Select_Boss_Farm":"","AutoResetLostBoat":false,"auto_farm_nearest_range":500,"AutoQuestBoss":false}]]
+
+local REALKID_CONFIG_YAMA_BASE = [[{"WalkSpeedSlider":100,"EspSeaEventIsland":false,"UpgradeDragonTalon":false,"ChangeTransparencyCanSee":false,"LeviathanMultiCannon":false,"GoToSharkmanNPC":false,"ValueDamageMultiSegments":30000,"AutoStartRaid":false,"AutoTrainV4":false,"SpectatePlayer":false,"AutoMelee":false,"SelectBoatTarget":"My Boat","farm_m1_gun_sea":false,"DungeonAccountStart":false,"global_skill_hold_c":10,"AutoV3Target_Toggle":false,"selected_fighting_style":"Black Leg","toggle_bypass_tp":true,"AutoFindKitsuneIsland":false,"AutoCollectGear":false,"RemoveDeathRespawnVFX":false,"AutoTpAncientClock":false,"farm_height":35,"TeleportToPlayer":false,"AutoEliteQuest":false,"autoshootgun":true,"AutoDracoFully":false,"BaitSelection":"Basic Bait","auto_pirate_raid":false,"auto_farm_sea_event":false,"discord_notice_mirage":false,"AutoSlapDodgeAABB":false,"EspChests":false,"ChooseSeaLevel":"Lv 1","AzureEmberToTrade":1,"AutoTpAncientOne":false,"Berry":false,"AutoHopChest":false,"AutoLookAtMoon":false,"card_selection":[],"EspAdvancedFruitsDealer":false,"autotwfruits":false,"AcceptRainbowQuest":false,"AutoCollectDragonEggs":false,"AutoYamaCDK":true,"auto_zou_quest":false,"AutoFarmObservationHop":false,"auto_dragon_hunter":false,"SwapDragoRace":false,"global_skill_hold_z":10,"AutoPhoenixDungeon":false,"Select_Boss_Farm":"","AutoPickDungeonCards":false,"EspAuraColourDealers":false,"RaceV4Aura":false,"global_skill_hold_x":10,"AutoResetWhenCompleteVolcano":false,"AutoValkyrie":false,"AutoRelicDragoTrial":false,"AutoTrainDragoV4":false,"EspGears":false,"AutoTushitaSword":false,"global_skill_keys":["Z","X","C"],"AutoDriveToHydraIsland":false,"auto_buy_style":false,"AutoFireShootHeartLeviathan":false,"JumpPower":false,"AutoBuyV4Gear":false,"DungeonAutoJoin":false,"AutoEscapeRoughSea":false,"auto_farm_materials":false,"AutoStackDarkbeard":false,"AutoCollectAzureEmber":false,"BringMobMax":"6","AntiAFK":true,"AutoChooseV4Gear":false,"SafeMode":false,"auto_farm_general":false,"RandomAround":false,"AutoGun":false,"AutoBuyChipFruit":false,"WalkSpeed":false,"AutoDefense":false,"HopBerry":false,"AutoSerpentBow":false,"TweenToDragoTrials":false,"FarmMastery_G":false,"AutoFindLeviathan":false,"BusuAura":true,"EspIslandLocation":false,"accept_quests":false,"Chest":false,"auto_citizen_quest":false,"AutoTravel":false,"AutoCanvendishSword":false,"EspPlayers":false,"AutoTweenHighestPoint":false,"AutoDojoTrainer":false,"AutoTradeAzureEmber":false,"AutoSwords":false,"toggle_portal_tp":true,"AttackMultiSegmentsLeviathan":false,"AutoPrayGravestone":false,"auto_farm_leviathan":false,"discord_notice_prehistoric":false,"auto_farm_nearest":false,"AutoDragoV2":false,"mastery_health_percent":"30%","StopWhenChalice":true,"global_skill_hold_v":10,"BringMode":"400","auto_farm_tyrant":false,"AutoFindPrehistoricIsland":false,"Bringmob":true,"auto_factory_raid":false,"global_skill_hold_f":10,"mastery_island_choice":"Cake","RemoveHitVFX":false,"AutoGetCDK":false,"TweenSpeedNewZ":280,"weapon_choice":"Melee","AutoSkullGuitar":false,"discord_notice_frozen":false,"auto_training_dummy":false,"raidnew":false,"EspFruits":false,"AutoSelectDungeon":false,"MagicFruits":false,"selected_sea_events":[],"attack_method_golem":"Attack","AutoRainbowColors":false,"auto_travel_dressrosa":false,"AutoSoulReaper":false,"AutoUnlockedPuzzle":false,"farm_m1_fruit_sea":false,"AutoYamaSword":false,"tocdothuyen":"200","ChooseBoats":"MarineGrandBrigade","AutoTeleportToShrineActived":false,"ResetVolcanoAfterCollectingLoot":false,"AutoBuyFruitsFlag":false,"RaceV3Aura":false,"AutoStoreFruitFlag":false,"MaxChestHop":45,"global_skill_delay":100,"AutoCollectDinoBones":false,"DungeonMinPlayers":2,"AutoBigmom":false,"AutoCraftVolcanicMagnet":false,"AutoSailBoat":false,"AutoDragoV3":false,"AutoPullLever":false,"DungeonDifficulty":"Normal","JumpPowerSlider":50,"AutoRandomBones":false,"global_skill_weapons":["Melee"],"Initialize":true,"AutoTeleportFrozenDimension":false,"AutoUnlockDoughDungeon":false,"AutoFarmMaterialSkullGuitar":false,"EspBerries":false,"auto_mastery_fruits":false,"AutoTryLuck":false,"AutoDragoV1":false,"AutoLeiAccessory":false,"AutoTeleportBarista":false,"selected_farm_target":"Auto Level","AutoTweenAdvancedFruitDealer":false,"AutoFindMirageIsland":false,"AutoBloxFruit":false,"AutoObservationV2":false,"AutoTushitaCDK":false,"AutoCompleteTrialRace":false,"AutoMirror":false,"AutoCollectMirageChest":false,"AutoBossToggle":false,"AutoDriveToTikiOutport":false,"AutoFarmObservation":false,"KenAura":true,"auto_farm_nearest_range":500,"AutoSpawnRipIndra":false,"ResetAfterTrial":false,"hopantirs":false,"AutoTwinHooks":false,"auto_break_bottle":false,"RodSelection":"Fishing Rod","AutoAwakening":false,"DisableNotify":false,"AutoKillPlayerAfterTrial":false,"MasterySword":false,"AutoOpenMenuHopFarm":false,"auto_patch_prehistoric":false,"AutoResetLostBoat":false,"AutoRemoveSkyFog":false,"AutoQuestBoss":false}]]
+
+local REALKID_CONFIG_YAMA_HOP = [[{"WalkSpeedSlider":100,"EspSeaEventIsland":false,"UpgradeDragonTalon":false,"ChangeTransparencyCanSee":false,"LeviathanMultiCannon":false,"GoToSharkmanNPC":false,"ValueDamageMultiSegments":30000,"AutoStartRaid":false,"AutoTrainV4":false,"SpectatePlayer":false,"AutoMelee":false,"SelectBoatTarget":"My Boat","farm_m1_gun_sea":false,"DungeonAccountStart":false,"global_skill_hold_c":10,"AutoV3Target_Toggle":false,"selected_fighting_style":"Black Leg","toggle_bypass_tp":true,"AutoFindKitsuneIsland":false,"AutoCollectGear":false,"RemoveDeathRespawnVFX":false,"AutoTpAncientClock":false,"farm_height":35,"TeleportToPlayer":false,"AutoEliteQuest":false,"autoshootgun":true,"AutoDracoFully":false,"BaitSelection":"Basic Bait","auto_pirate_raid":false,"auto_farm_sea_event":false,"discord_notice_mirage":false,"AutoSlapDodgeAABB":false,"EspChests":false,"ChooseSeaLevel":"Lv 1","AzureEmberToTrade":1,"AutoTpAncientOne":false,"Berry":false,"AutoHopChest":false,"AutoLookAtMoon":false,"card_selection":[],"EspAdvancedFruitsDealer":false,"autotwfruits":false,"AcceptRainbowQuest":false,"AutoCollectDragonEggs":false,"AutoYamaCDK":true,"auto_zou_quest":false,"AutoFarmObservationHop":false,"auto_dragon_hunter":false,"SwapDragoRace":false,"global_skill_hold_z":10,"AutoPhoenixDungeon":false,"Select_Boss_Farm":"","AutoPickDungeonCards":false,"EspAuraColourDealers":false,"RaceV4Aura":false,"global_skill_hold_x":10,"AutoResetWhenCompleteVolcano":false,"AutoValkyrie":false,"AutoRelicDragoTrial":false,"AutoTrainDragoV4":false,"EspGears":false,"AutoTushitaSword":false,"global_skill_keys":["Z","X","C"],"AutoDriveToHydraIsland":false,"auto_buy_style":false,"AutoFireShootHeartLeviathan":false,"JumpPower":false,"AutoBuyV4Gear":false,"DungeonAutoJoin":false,"AutoEscapeRoughSea":false,"auto_farm_materials":false,"AutoStackDarkbeard":false,"AutoCollectAzureEmber":false,"BringMobMax":"6","AntiAFK":true,"AutoChooseV4Gear":false,"SafeMode":false,"auto_farm_general":false,"RandomAround":false,"AutoGun":false,"AutoBuyChipFruit":false,"WalkSpeed":false,"AutoDefense":false,"HopBerry":false,"AutoSerpentBow":false,"TweenToDragoTrials":false,"FarmMastery_G":false,"AutoFindLeviathan":false,"BusuAura":true,"EspIslandLocation":false,"accept_quests":false,"Chest":false,"auto_citizen_quest":false,"AutoTravel":false,"AutoCanvendishSword":false,"EspPlayers":false,"AutoTweenHighestPoint":false,"AutoDojoTrainer":false,"AutoTradeAzureEmber":false,"AutoSwords":false,"toggle_portal_tp":true,"AttackMultiSegmentsLeviathan":false,"AutoPrayGravestone":false,"auto_farm_leviathan":false,"discord_notice_prehistoric":false,"auto_farm_nearest":false,"AutoDragoV2":false,"mastery_health_percent":"30%","StopWhenChalice":true,"global_skill_hold_v":10,"BringMode":"400","auto_farm_tyrant":false,"AutoFindPrehistoricIsland":false,"Bringmob":true,"auto_factory_raid":false,"global_skill_hold_f":10,"mastery_island_choice":"Cake","RemoveHitVFX":false,"AutoGetCDK":false,"TweenSpeedNewZ":280,"weapon_choice":"Melee","AutoSkullGuitar":false,"discord_notice_frozen":false,"auto_training_dummy":false,"raidnew":false,"EspFruits":false,"AutoSelectDungeon":false,"MagicFruits":false,"selected_sea_events":[],"attack_method_golem":"Attack","AutoRainbowColors":false,"auto_travel_dressrosa":false,"AutoSoulReaper":false,"AutoUnlockedPuzzle":false,"farm_m1_fruit_sea":false,"AutoYamaSword":false,"tocdothuyen":"200","ChooseBoats":"MarineGrandBrigade","AutoTeleportToShrineActived":false,"ResetVolcanoAfterCollectingLoot":false,"AutoBuyFruitsFlag":false,"RaceV3Aura":false,"AutoStoreFruitFlag":false,"MaxChestHop":45,"global_skill_delay":100,"AutoCollectDinoBones":false,"DungeonMinPlayers":2,"AutoBigmom":false,"AutoCraftVolcanicMagnet":false,"AutoSailBoat":false,"AutoDragoV3":false,"AutoPullLever":false,"DungeonDifficulty":"Normal","JumpPowerSlider":50,"AutoRandomBones":false,"global_skill_weapons":["Melee"],"Initialize":true,"AutoTeleportFrozenDimension":false,"AutoUnlockDoughDungeon":false,"AutoFarmMaterialSkullGuitar":false,"EspBerries":false,"auto_mastery_fruits":false,"AutoTryLuck":false,"AutoDragoV1":false,"AutoLeiAccessory":false,"AutoTeleportBarista":false,"selected_farm_target":"Auto Level","AutoTweenAdvancedFruitDealer":false,"AutoFindMirageIsland":false,"AutoBloxFruit":false,"AutoObservationV2":false,"AutoTushitaCDK":false,"AutoCompleteTrialRace":false,"AutoMirror":false,"AutoCollectMirageChest":false,"AutoBossToggle":false,"AutoDriveToTikiOutport":false,"AutoFarmObservation":false,"KenAura":true,"auto_farm_nearest_range":500,"AutoSpawnRipIndra":false,"ResetAfterTrial":false,"hopantirs":false,"AutoTwinHooks":false,"auto_break_bottle":false,"RodSelection":"Fishing Rod","AutoAwakening":false,"DisableNotify":false,"AutoKillPlayerAfterTrial":false,"MasterySword":false,"AutoOpenMenuHopFarm":true,"auto_patch_prehistoric":false,"AutoResetLostBoat":false,"AutoRemoveSkyFog":false,"AutoQuestBoss":false}]]
+
+local REALKID_CONFIG_TUSHITA = [[{"WalkSpeedSlider":100,"EspSeaEventIsland":false,"UpgradeDragonTalon":false,"ChangeTransparencyCanSee":false,"LeviathanMultiCannon":false,"GoToSharkmanNPC":false,"ValueDamageMultiSegments":30000,"AutoStartRaid":false,"AutoTrainV4":false,"SpectatePlayer":false,"AutoMelee":false,"SelectBoatTarget":"My Boat","farm_m1_gun_sea":false,"DungeonAccountStart":false,"global_skill_hold_c":10,"AutoV3Target_Toggle":false,"selected_fighting_style":"Black Leg","toggle_bypass_tp":true,"AutoFindKitsuneIsland":false,"AutoCollectGear":false,"RemoveDeathRespawnVFX":false,"AutoTpAncientClock":false,"farm_height":35,"TeleportToPlayer":false,"AutoEliteQuest":false,"autoshootgun":true,"AutoDracoFully":false,"BaitSelection":"Basic Bait","auto_pirate_raid":false,"auto_farm_sea_event":false,"discord_notice_mirage":false,"AutoSlapDodgeAABB":false,"EspChests":false,"ChooseSeaLevel":"Lv 1","AzureEmberToTrade":1,"AutoTpAncientOne":false,"Berry":false,"AutoHopChest":false,"AutoLookAtMoon":false,"card_selection":[],"EspAdvancedFruitsDealer":false,"autotwfruits":false,"AcceptRainbowQuest":false,"AutoCollectDragonEggs":false,"AutoYamaCDK":false,"auto_zou_quest":false,"AutoFarmObservationHop":false,"auto_dragon_hunter":false,"SwapDragoRace":false,"global_skill_hold_z":10,"AutoPhoenixDungeon":false,"Select_Boss_Farm":"","AutoPickDungeonCards":false,"EspAuraColourDealers":false,"RaceV4Aura":false,"global_skill_hold_x":10,"AutoResetWhenCompleteVolcano":false,"AutoValkyrie":false,"AutoRelicDragoTrial":false,"AutoTrainDragoV4":false,"EspGears":false,"AutoTushitaSword":false,"global_skill_keys":["Z","X","C"],"AutoDriveToHydraIsland":false,"auto_buy_style":false,"AutoFireShootHeartLeviathan":false,"JumpPower":false,"AutoBuyV4Gear":false,"DungeonAutoJoin":false,"AutoEscapeRoughSea":false,"auto_farm_materials":false,"AutoStackDarkbeard":false,"AutoCollectAzureEmber":false,"BringMobMax":"6","AntiAFK":true,"AutoChooseV4Gear":false,"SafeMode":false,"auto_farm_general":false,"RandomAround":false,"AutoGun":false,"AutoBuyChipFruit":false,"WalkSpeed":false,"AutoDefense":false,"HopBerry":false,"AutoSerpentBow":false,"TweenToDragoTrials":false,"FarmMastery_G":false,"AutoFindLeviathan":false,"BusuAura":true,"EspIslandLocation":false,"accept_quests":false,"Chest":false,"auto_citizen_quest":false,"AutoTravel":false,"AutoCanvendishSword":false,"EspPlayers":false,"AutoTweenHighestPoint":false,"AutoDojoTrainer":false,"AutoTradeAzureEmber":false,"AutoSwords":false,"toggle_portal_tp":true,"AttackMultiSegmentsLeviathan":false,"AutoPrayGravestone":false,"auto_farm_leviathan":false,"discord_notice_prehistoric":false,"auto_farm_nearest":false,"AutoDragoV2":false,"mastery_health_percent":"30%","StopWhenChalice":true,"global_skill_hold_v":10,"BringMode":"400","auto_farm_tyrant":false,"AutoFindPrehistoricIsland":false,"Bringmob":true,"auto_factory_raid":false,"global_skill_hold_f":10,"mastery_island_choice":"Cake","RemoveHitVFX":false,"AutoGetCDK":false,"TweenSpeedNewZ":280,"weapon_choice":"Melee","AutoSkullGuitar":false,"discord_notice_frozen":false,"auto_training_dummy":false,"raidnew":false,"EspFruits":false,"AutoSelectDungeon":false,"MagicFruits":false,"selected_sea_events":[],"attack_method_golem":"Attack","AutoRainbowColors":false,"auto_travel_dressrosa":false,"AutoSoulReaper":false,"AutoUnlockedPuzzle":false,"farm_m1_fruit_sea":false,"AutoYamaSword":false,"tocdothuyen":"200","ChooseBoats":"MarineGrandBrigade","AutoTeleportToShrineActived":false,"ResetVolcanoAfterCollectingLoot":false,"AutoBuyFruitsFlag":false,"RaceV3Aura":false,"AutoStoreFruitFlag":false,"MaxChestHop":45,"global_skill_delay":100,"AutoCollectDinoBones":false,"DungeonMinPlayers":2,"AutoBigmom":false,"AutoCraftVolcanicMagnet":false,"AutoSailBoat":false,"AutoDragoV3":false,"AutoPullLever":false,"DungeonDifficulty":"Normal","JumpPowerSlider":50,"AutoRandomBones":false,"global_skill_weapons":["Melee"],"Initialize":true,"AutoTeleportFrozenDimension":false,"AutoUnlockDoughDungeon":false,"AutoFarmMaterialSkullGuitar":false,"EspBerries":false,"auto_mastery_fruits":false,"AutoTryLuck":false,"AutoDragoV1":false,"AutoLeiAccessory":false,"AutoTeleportBarista":false,"selected_farm_target":"Auto Level","AutoTweenAdvancedFruitDealer":false,"AutoFindMirageIsland":false,"AutoBloxFruit":false,"AutoObservationV2":false,"AutoTushitaCDK":true,"AutoCompleteTrialRace":false,"AutoMirror":false,"AutoCollectMirageChest":false,"AutoBossToggle":false,"AutoDriveToTikiOutport":false,"AutoFarmObservation":false,"KenAura":true,"auto_farm_nearest_range":500,"AutoSpawnRipIndra":false,"ResetAfterTrial":false,"hopantirs":false,"AutoTwinHooks":false,"auto_break_bottle":false,"RodSelection":"Fishing Rod","AutoAwakening":false,"DisableNotify":false,"AutoKillPlayerAfterTrial":false,"MasterySword":false,"AutoOpenMenuHopFarm":false,"auto_patch_prehistoric":false,"AutoResetLostBoat":false,"AutoRemoveSkyFog":false,"AutoQuestBoss":false}]]
+
+local REALKID_CONFIG_BOSS = [[{"WalkSpeedSlider":100,"EspSeaEventIsland":false,"UpgradeDragonTalon":false,"ChangeTransparencyCanSee":false,"LeviathanMultiCannon":false,"RemoveHitVFX":false,"ValueDamageMultiSegments":30000,"AutoStartRaid":false,"AutoTrainV4":false,"SpectatePlayer":false,"AutoMelee":false,"SelectBoatTarget":"My Boat","farm_m1_gun_sea":false,"DungeonAccountStart":false,"global_skill_hold_c":10,"AutoV3Target_Toggle":false,"selected_fighting_style":"Black Leg","ResetAfterTrial":false,"AutoFindKitsuneIsland":false,"AutoCollectGear":false,"RemoveDeathRespawnVFX":false,"AutoTpAncientClock":false,"AutoSwords":false,"EspIslandLocation":false,"AutoEliteQuest":false,"autoshootgun":true,"AutoDracoFully":false,"BaitSelection":"Basic Bait","auto_pirate_raid":false,"auto_farm_sea_event":false,"discord_notice_mirage":false,"AutoSlapDodgeAABB":false,"EspChests":false,"ChooseSeaLevel":"Lv 1","AzureEmberToTrade":1,"AutoTpAncientOne":false,"Berry":false,"AutoHopChest":false,"AutoLookAtMoon":false,"card_selection":[],"EspAdvancedFruitsDealer":false,"autotwfruits":false,"AcceptRainbowQuest":false,"AutoCollectDragonEggs":false,"AutoYamaCDK":true,"auto_zou_quest":false,"AutoFarmObservationHop":false,"auto_dragon_hunter":false,"MasterySword":false,"global_skill_hold_z":10,"AutoPhoenixDungeon":false,"AutoOpenMenuHopFarm":false,"AutoPickDungeonCards":false,"BringMobMax":"6","RaceV4Aura":false,"AutoRemoveSkyFog":false,"AutoResetWhenCompleteVolcano":false,"AutoValkyrie":false,"AutoRelicDragoTrial":false,"AutoTrainDragoV4":false,"EspGears":false,"AutoTushitaSword":false,"global_skill_keys":["Z","X","C"],"AutoDriveToHydraIsland":false,"auto_buy_style":false,"auto_farm_materials":false,"JumpPower":false,"AutoBuyV4Gear":false,"DungeonAutoJoin":false,"AutoEscapeRoughSea":false,"AutoFireShootHeartLeviathan":false,"AutoStackDarkbeard":false,"AutoCollectAzureEmber":false,"EspAuraColourDealers":false,"AntiAFK":true,"AutoChooseV4Gear":false,"SafeMode":false,"auto_farm_general":false,"RandomAround":false,"AutoGun":false,"mastery_island_choice":"Cake","WalkSpeed":false,"AutoDefense":false,"HopBerry":false,"AutoSerpentBow":false,"TweenToDragoTrials":false,"FarmMastery_G":false,"auto_patch_prehistoric":false,"BusuAura":true,"Bringmob":true,"accept_quests":false,"Chest":false,"auto_citizen_quest":false,"AutoTravel":false,"AutoCanvendishSword":false,"AutoDojoTrainer":false,"AutoTweenHighestPoint":false,"TeleportToPlayer":false,"AutoTradeAzureEmber":false,"farm_height":35,"discord_notice_prehistoric":false,"GoToSharkmanNPC":false,"AutoPrayGravestone":false,"EspFruits":false,"toggle_portal_tp":true,"auto_farm_nearest":false,"AutoDragoV2":false,"mastery_health_percent":"30%","StopWhenChalice":true,"global_skill_hold_v":10,"BringMode":"400","auto_farm_tyrant":false,"AutoFindPrehistoricIsland":false,"AttackMultiSegmentsLeviathan":false,"auto_factory_raid":false,"global_skill_hold_f":10,"AutoBuyChipFruit":false,"AutoAwakening":false,"AutoGetCDK":true,"TweenSpeedNewZ":280,"weapon_choice":"Melee","AutoSkullGuitar":false,"discord_notice_frozen":false,"auto_training_dummy":false,"raidnew":false,"auto_farm_leviathan":false,"AutoSelectDungeon":false,"MagicFruits":false,"selected_sea_events":[],"attack_method_golem":"Attack","AutoCompleteTrialRace":false,"auto_travel_dressrosa":false,"AutoSoulReaper":false,"AutoUnlockedPuzzle":false,"farm_m1_fruit_sea":false,"AutoYamaSword":false,"tocdothuyen":"200","ChooseBoats":"MarineGrandBrigade","AutoTeleportToShrineActived":false,"ResetVolcanoAfterCollectingLoot":false,"RaceV3Aura":false,"AutoBuyFruitsFlag":false,"AutoStoreFruitFlag":false,"MaxChestHop":45,"global_skill_delay":100,"AutoCollectDinoBones":false,"DungeonMinPlayers":2,"AutoBigmom":false,"AutoCraftVolcanicMagnet":false,"AutoSailBoat":false,"AutoDragoV3":false,"AutoPullLever":false,"DungeonDifficulty":"Normal","JumpPowerSlider":50,"AutoRandomBones":false,"global_skill_weapons":["Melee"],"Initialize":true,"AutoTeleportFrozenDimension":false,"AutoUnlockDoughDungeon":false,"AutoFarmMaterialSkullGuitar":false,"EspBerries":false,"auto_mastery_fruits":false,"AutoTryLuck":false,"AutoDragoV1":false,"AutoLeiAccessory":false,"AutoTeleportBarista":false,"selected_farm_target":"Auto Level","AutoTweenAdvancedFruitDealer":false,"AutoFindMirageIsland":false,"AutoBloxFruit":false,"AutoObservationV2":false,"AutoTushitaCDK":true,"AutoRainbowColors":false,"AutoMirror":false,"AutoCollectMirageChest":false,"AutoBossToggle":false,"AutoDriveToTikiOutport":false,"AutoFarmObservation":false,"KenAura":true,"auto_farm_nearest_range":500,"AutoSpawnRipIndra":false,"toggle_bypass_tp":false,"hopantirs":false,"AutoTwinHooks":false,"auto_break_bottle":false,"RodSelection":"Fishing Rod","EspPlayers":false,"DisableNotify":false,"AutoKillPlayerAfterTrial":false,"AutoFindLeviathan":false,"SwapDragoRace":false,"Select_Boss_Farm":"","AutoResetLostBoat":false,"global_skill_hold_x":10,"AutoQuestBoss":false}]]
+
+local NIGHTHUB_CONFIG_CASTLE_RAID = [[{"Auto Hop Fullmoon":false,"Auto Hop Legendary Sword":false,"Enable Fast Attack":true,"Select Tool":"Melee","Auto Hop Find Fruits":false,"Auto Ghoul":false,"Auto Hop Mirage Island":false,"Auto Castle Raid":true,"Auto Buso":true,"Auto Hop Kitsune Island":false,"Teleport to Fruits":false,"Auto True Triple Katana":false,"Auto Tushita":false,"Enable Bypass Teleport":true,"Teleport to Berry":false,"Auto Yama":false,"Auto Hop Berry":false,"Auto Buy Legendary Sword":false,"@everyone":false,"Auto Hop Castle Raid":true,"Auto Hop Find Boss":false,"Send Webhook Killed Boss":false,"Select Theme":"Dark","Auto Hop Prehistoric Island":false,"Auto Hop Near Moon":false,"Start Farm Boss":false,"Tween Speed":"250"}]]
+
+-- =========================================================================
+-- BỘ NẠP HUBS VÀ ĐỒNG BỘ CONFIG (TỰ ĐỘNG ĐỢI 1S RỒI CHẠY LẠI)
+-- =========================================================================
+local function LaunchRealKid(delaySec)
+    task.spawn(function()
+        if delaySec and delaySec > 0 then task.wait(delaySec) end
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/realkidhub/realkid/refs/heads/main/main.lua"))()
+        end)
+    end)
+end
+
+local function LaunchNightHub(delaySec)
+    task.spawn(function()
+        if delaySec and delaySec > 0 then task.wait(delaySec) end
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/WhiteX1208/Scripts/refs/heads/main/HopScript.luau"))()
+        end)
+    end)
+end
+
+local function WriteRealKidConfig(configRaw)
+    pcall(function()
+        if makefolder then
+            if not isfolder("RealKidHub") then makefolder("RealKidHub") end
+            if not isfolder("RealKidHub/save2") then makefolder("RealKidHub/save2") end
+        end
+
+        local configPath = "RealKidHub/save2/" .. LocalPlayer.Name .. ".json"
+        if writefile then
+            writefile(configPath, configRaw)
+        end
+    end)
+end
+
+local function WriteNightHubConfig(configData)
+    pcall(function()
+        if makefolder then
+            if not isfolder("Night Hub") then makefolder("Night Hub") end
+            if not isfolder("Night Hub/Hop Boss") then makefolder("Night Hub/Hop Boss") end
+        end
+
+        local configPath = "Night Hub/Hop Boss/Night-" .. LocalPlayer.Name .. "-Settings.json"
+        if writefile then
+            writefile(configPath, configData)
+        end
+    end)
+end
+
+local function DispatchNightHubInstant(targetMode, forceRelaunch)
+    EnsureNightHubKey()
+
+    if Engine.CurrentNightHubMode ~= targetMode or forceRelaunch then
+        Engine.CurrentNightHubMode = targetMode
+        Engine.NightHubRunning = true
+        getgenv()._NightHubExecuted = true
+
+        local configData = ""
+        if targetMode == "DoughKing" then
+            configData = '{"Auto Hop Fullmoon":false,"Auto Hop Legendary Sword":false,"Enable Fast Attack":true,"Select Boss":"Dough King","Select Tool":"Melee","Auto Hop Find Fruits":false,"Auto Ghoul":false,"Auto Hop Mirage Island":false,"Auto Castle Raid":false,"Auto Buso":true,"Auto Hop Kitsune Island":false,"Teleport to Fruits":false,"Auto True Triple Katana":false,"Auto Tushita":false,"Enable Bypass Teleport":true,"Teleport to Berry":false,"Auto Yama":false,"Auto Hop Berry":false,"Auto Buy Legendary Sword":false,"@everyone":false,"Auto Hop Castle Raid":false,"Auto Hop Find Boss":true,"Send Webhook Killed Boss":false,"Select Theme":"Dark","Auto Hop Prehistoric Island":false,"Auto Hop Near Moon":false,"Start Farm Boss":true,"Tween Speed":"180"}'
+            lblStatus.Text = "Trạng thái: 🚀 Ghi đè config Dough King -> Đợi 1s và chạy lại Night Hub!"
+        elseif targetMode == "Valkyrie" then
+            configData = '{"Auto Hop Fullmoon":false,"Auto Hop Legendary Sword":false,"Enable Fast Attack":true,"Select Boss":"Rip Indra","Select Tool":"Melee","Auto Hop Find Fruits":false,"Auto Ghoul":false,"Auto Hop Mirage Island":false,"Auto Castle Raid":false,"Auto Buso":true,"Auto Hop Kitsune Island":false,"Teleport to Fruits":false,"Auto True Triple Katana":false,"Auto Tushita":false,"Enable Bypass Teleport":true,"Teleport to Berry":false,"Auto Yama":false,"Auto Hop Berry":false,"Auto Buy Legendary Sword":false,"@everyone":false,"Auto Hop Castle Raid":false,"Auto Hop Find Boss":true,"Send Webhook Killed Boss":false,"Select Theme":"Dark","Auto Hop Prehistoric Island":false,"Auto Hop Near Moon":false,"Start Farm Boss":true,"Tween Speed":"180"}'
+            lblStatus.Text = "Trạng thái: 🚀 ĐÃ CÓ TUSHITA! Ghi đè Valkyrie Helm -> Đợi 1s và chạy lại Night Hub!"
+        elseif targetMode == "Yama" then
+            configData = '{"Auto Hop Fullmoon":false,"Auto Hop Legendary Sword":false,"Enable Fast Attack":true,"Select Tool":"Melee","Auto Hop Find Fruits":false,"Auto Ghoul":false,"Auto Hop Mirage Island":false,"Auto Castle Raid":false,"Auto Buso":true,"Auto Hop Kitsune Island":false,"Teleport to Fruits":false,"Auto True Triple Katana":false,"Auto Tushita":false,"Enable Bypass Teleport":true,"Teleport to Berry":false,"Auto Yama":true,"Auto Hop Berry":false,"Auto Buy Legendary Sword":false,"@everyone":false,"Auto Hop Castle Raid":false,"Auto Hop Find Boss":false,"Send Webhook Killed Boss":false,"Select Theme":"Dark","Auto Hop Prehistoric Island":false,"Auto Hop Near Moon":false,"Start Farm Boss":false,"Tween Speed":"180"}'
+            lblStatus.Text = "Trạng thái: 🚀 Ghi đè config Auto Yama -> Đợi 1s và chạy lại Night Hub!"
+        else
+            configData = '{"Auto Hop Fullmoon":false,"Auto Hop Legendary Sword":false,"Enable Fast Attack":true,"Select Tool":"Melee","Auto Hop Find Fruits":false,"Auto Ghoul":false,"Auto Hop Mirage Island":false,"Auto Castle Raid":false,"Auto Buso":true,"Auto Hop Kitsune Island":false,"Teleport to Fruits":false,"Auto True Triple Katana":false,"Auto Tushita":true,"Enable Bypass Teleport":true,"Teleport to Berry":false,"Auto Yama":false,"Auto Hop Berry":false,"Auto Buy Legendary Sword":false,"@everyone":false,"Auto Hop Castle Raid":false,"Auto Hop Find Boss":false,"Send Webhook Killed Boss":false,"Select Theme":"Dark","Auto Hop Prehistoric Island":false,"Auto Hop Near Moon":false,"Start Farm Boss":false,"Tween Speed":"180"}'
+            lblStatus.Text = "Trạng thái: 🚀 Ghi đè config Auto Tushita -> Đợi 1s và chạy lại Night Hub!"
+        end
+
+        WriteNightHubConfig(configData)
+        warn(string.format("[AXIOM PIPELINE] Ghi đè file config Night Hub: %s! Đợi 1s rồi thực thi script...", targetMode))
+        LaunchNightHub(1.0)
+    end
+end
+
+local function CheckAndTriggerInitialSubmergedMode()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart", 10)
+    if not hrp then return false end
+
+    local dist = (hrp.Position - POS_SUBMERGED_ISLAND).Magnitude
+    if dist <= SUBMERGED_ISLAND_RADIUS then
+        Engine.RealkidRunning = true
+        Engine.NightHubRunning = false
+        getgenv()._NightHubExecuted = true
+
+        lblStatus.Text = "Trạng thái: 🫐 Đang ở Submerged! Ghi config RealKidHub -> Đợi 1s và nạp Auto Berry..."
+        WriteRealKidConfig(REALKID_CONFIG_BERRY)
+        LaunchRealKid(1.0)
+
+        task.spawn(function()
+            for remaining = 40, 1, -1 do
+                if not Engine.IsRunning then break end
+                lblStatus.Text = string.format("Trạng thái: 🫐 RealKid Auto Berry đang chạy... Hop Low Server sau: %d giây!", remaining)
+                task.wait(1)
+            end
+
+            if Engine.IsRunning then
+                lblStatus.Text = "Trạng thái: 🌐 Hết 40 giây Auto Berry! Bắt đầu Hop Low Server..."
+                Engine:HopLowServer()
+            end
+        end)
+
+        return true
+    end
+    return false
+end
+
+-- =========================================================================
+-- [BƯỚC 8] ĐỒNG HỒ ĐỘC LẬP (TỰ ĐỘNG HOP 20 PHÚT & THEO DÕI NGƯỜI CHƠI)
+-- =========================================================================
+local timerMasterThread = task.spawn(function()
+    while Engine.IsRunning do
+        local elapsed = os.clock() - Engine.ServerJoinTime
+        local m = math.floor(elapsed / 60)
+        local s = math.floor(elapsed % 60)
+
+        timerBadge.Text = string.format("⏰ %02d:%02d / 20:00", m, s)
+        if elapsed >= 1080 and elapsed < 1200 then
+            timerBadge.BackgroundColor3 = Color3.fromRGB(60, 50, 20)
+            timerBadge.TextColor3 = Color3.fromRGB(255, 200, 50)
+        elseif elapsed >= 1200 then
+            timerBadge.BackgroundColor3 = Color3.fromRGB(70, 20, 20)
+            timerBadge.TextColor3 = Color3.fromRGB(255, 80, 80)
+        end
+
+        if elapsed >= 1200 and not Engine.IsHopping then
+            lblStatus.Text = string.format("Trạng thái: ⏰ ĐÃ Ở TRONG SERVER QUÁ 20 PHÚT (%02d:%02d)! Đang tự động Hop Low Server...", m, s)
+            Engine:HopLowServer()
+            break
+        end
+
+        task.wait(0.5)
+    end
+end)
+table.insert(Engine.Threads, timerMasterThread)
+
+local lastProximityCheck = os.clock()
+local proximityThread = task.spawn(function()
+    while Engine.IsRunning do
+        task.wait(1)
+        local now = os.clock()
+        local dt = now - lastProximityCheck
+        lastProximityCheck = now
+
+        if Engine.CurrentObjective == "MasteryFarm" and not Engine.InCDKMode then
+            local myChar = LocalPlayer.Character
+            local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+            local foundNearby = false
+            local closestPlayerName = ""
+            local closestDist = math.huge
+
+            if myHrp then
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                        local pHrp = p.Character.HumanoidRootPart
+                        local dist = (myHrp.Position - pHrp.Position).Magnitude
+                        if dist <= 250 then
+                            foundNearby = true
+                            if dist < closestDist then
+                                closestDist = dist
+                                closestPlayerName = p.DisplayName or p.Name
+                            end
+                        end
+                    end
+                end
+            end
+
+            if foundNearby then
+                Engine.CumulativeNearPlayerSeconds = Engine.CumulativeNearPlayerSeconds + dt
+                lblPlayerTracker.Text = string.format("Người chơi gần: ⚠️ %s (%d studs) [Tích lũy: %ds/180s]", closestPlayerName, math.floor(closestDist), math.floor(Engine.CumulativeNearPlayerSeconds))
+                lblPlayerTracker.TextColor3 = Color3.fromRGB(255, 120, 80)
+            else
+                lblPlayerTracker.Text = string.format("Người chơi gần: 🟢 An toàn [Tích lũy: %ds/180s]", math.floor(Engine.CumulativeNearPlayerSeconds))
+                lblPlayerTracker.TextColor3 = Color3.fromRGB(120, 220, 160)
+            end
+
+            if Engine.CumulativeNearPlayerSeconds >= 180 and not Engine.IsHopping then
+                lblStatus.Text = "Trạng thái: 🚨 ĐÃ TÍCH LŨY ĐỦ 3 PHÚT CÓ NGƯỜI Ở GẦN KHI FARM MASTERY! Đang Hop Low Server..."
+                Engine:HopLowServer()
+            end
+        else
+            Engine.CumulativeNearPlayerSeconds = 0
+            lblPlayerTracker.Text = "Người chơi gần: ⚪ Tắt (Chỉ bật khi Farm Mastery)"
+            lblPlayerTracker.TextColor3 = Color3.fromRGB(160, 170, 180)
+        end
+    end
+end)
+table.insert(Engine.Threads, proximityThread)
+
+-- =========================================================================
+-- [BƯỚC 9] TWEEN CHỐNG LAGBACK (ANTI-RUBBERBAND)
+-- =========================================================================
+local function TweenToPosition(targetPos, speed)
+    if not Engine.IsRunning or Engine.IsHopping or Engine.RealkidRunning then return nil end
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    if Engine.CurrentTween then
+        pcall(function() Engine.CurrentTween:Cancel() end)
+        Engine.CurrentTween = nil
+    end
+
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then part.CanCollide = false end
+    end
+
+    local head = char:FindFirstChild("Head")
+    if head and not head:FindFirstChild("axiom_bv") then
+        local bv = Instance.new("BodyVelocity")
+        bv.Name = "axiom_bv"
+        bv.MaxForce = Vector3.new(0, math.huge, 0)
+        bv.Velocity = Vector3.zero
+        bv.Parent = head
+    end
+
+    Engine.IsTweening = true
+    local reached = false
+
+    while Engine.IsRunning and not reached and not Engine.IsHopping and not Engine.RealkidRunning do
+        char = LocalPlayer.Character
+        hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then break end
+
+        local currentDist = (hrp.Position - targetPos).Magnitude
+        if currentDist <= 6 then
+            reached = true
+            break
+        end
+
+        local duration = currentDist / (speed or 220)
+        local tw = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
+        Engine.CurrentTween = tw
+        tw:Play()
+
+        local lagbackTriggered = false
+        local lastDistToTarget = currentDist
+
+        local monitorConn
+        monitorConn = RunService.Heartbeat:Connect(function()
+            if not Engine.IsRunning or not hrp or not hrp.Parent or Engine.IsHopping or Engine.RealkidRunning then
+                if monitorConn then monitorConn:Disconnect() end
+                return
+            end
+
+            local distNow = (hrp.Position - targetPos).Magnitude
+            if distNow - lastDistToTarget > 25 then
+                lagbackTriggered = true
+                if monitorConn then monitorConn:Disconnect() end
+            else
+                if distNow < lastDistToTarget then
+                    lastDistToTarget = distNow
+                end
+            end
+        end)
+
+        while tw.PlaybackState == Enum.PlaybackState.Playing and not lagbackTriggered and not Engine.IsHopping and not Engine.RealkidRunning do
+            task.wait(0.05)
+        end
+
+        if monitorConn then monitorConn:Disconnect() end
+
+        if lagbackTriggered then
+            pcall(function() tw:Cancel() end)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            lblStatus.Text = "Trạng thái: ⚠️ Bị giật Lagback! Tạm dừng 1s để ổn định vị trí..."
+            task.wait(1)
+            lblStatus.Text = "Trạng thái: 🚀 Tiếp tục Tween đến mục tiêu..."
+        else
+            if (hrp.Position - targetPos).Magnitude <= 8 then
+                reached = true
+            end
+            break
+        end
+    end
+
+    Engine.IsTweening = false
+    return true
+end
+
+-- =========================================================================
+-- [BƯỚC 11] BRING 2-3 MOBS & FAST ATTACK ĐA LUỒNG PACKET
+-- =========================================================================
+local ObfuscatedRemote = nil
+local RemoteId = nil
+
+local function ResolveDynamicRemote()
+    local searchContainers = {
+        ReplicatedStorage:FindFirstChild("Util"),
+        ReplicatedStorage:FindFirstChild("Common"),
+        ReplicatedStorage:FindFirstChild("Remotes"),
+        ReplicatedStorage:FindFirstChild("Assets"),
+        ReplicatedStorage:FindFirstChild("FX"),
+    }
+
+    for _, container in ipairs(searchContainers) do
+        if container then
+            for _, child in ipairs(container:GetChildren()) do
+                if child:IsA("RemoteEvent") and child:GetAttribute("Id") then
+                    ObfuscatedRemote = child
+                    RemoteId = child:GetAttribute("Id")
+                    return
+                end
+            end
+            local conn = container.ChildAdded:Connect(function(child)
+                if child:IsA("RemoteEvent") and child:GetAttribute("Id") then
+                    ObfuscatedRemote = child
+                    RemoteId = child:GetAttribute("Id")
+                end
+            end)
+            table.insert(Engine.Connections, conn)
+        end
+    end
+end
+ResolveDynamicRemote()
+
+local BONE_NPCS = {
+    "Reborn Skeleton",
+    "Living Zombie",
+    "Demonic Soul",
+    "Posessed Mummy"
+}
+
+local function BringNearbyMobs(centerCFrame, targetName, maxMobs)
+    maxMobs = maxMobs or 3
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    pcall(function()
+        if sethiddenproperty then
+            sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+        end
+    end)
+
+    local targets = {}
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if enemiesFolder then
+        for _, mob in ipairs(enemiesFolder:GetChildren()) do
+            local mHum = mob:FindFirstChildOfClass("Humanoid")
+            local mRoot = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+            if mRoot and mHum and mHum.Health > 0 then
+                if not targetName or mob.Name == targetName or table.find(BONE_NPCS, mob.Name) then
+                    if (hrp.Position - mRoot.Position).Magnitude <= 220 then
+                        table.insert(targets, mob)
+                        if #targets >= maxMobs then break end
+                    end
+                end
+            end
+        end
+    end
+
+    if #targets < 2 then return end
+
+    for _, mob in ipairs(targets) do
+        local mRoot = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+        if mRoot then
+            pcall(function()
+                if sethiddenproperty then
+                    sethiddenproperty(mRoot, "NetworkOwnershipRule", Enum.NetworkOwnership.Manual)
+                end
+                if not isnetworkowner or isnetworkowner(mRoot) then
+                    mRoot.CFrame = centerCFrame
+                    mRoot.Velocity = Vector3.zero
+                    mRoot.AssemblyLinearVelocity = Vector3.zero
+                end
+            end)
+        end
+    end
+end
+
+local function EquipCombatTool()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword" or equipped:FindFirstChild("Combat") or equipped:FindFirstChild("Damage")) then
+        return equipped
+    end
+
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, item in ipairs(bp:GetChildren()) do
+            if item:IsA("Tool") and (item.ToolTip == "Sword" or item.ToolTip == "Melee") then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then hum:EquipTool(item) return item end
+            end
+        end
+    end
+    return equipped
+end
+
+local function EquipSpecificSword(swordName)
+    local char = LocalPlayer.Character
+    if not char then return false end
+
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped and equipped.Name == swordName then return true end
+
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp and bp:FindFirstChild(swordName) then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:EquipTool(bp[swordName])
+            return true
+        end
+    end
+
+    pcall(function()
+        ReplicatedStorage.Remotes.CommF_:InvokeServer("LoadItem", swordName)
+    end)
+    task.wait(0.2)
+
+    if bp and bp:FindFirstChild(swordName) then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:EquipTool(bp[swordName])
+            return true
+        end
+    end
+    return false
+end
+
+local function EnsureBuso()
+    local char = LocalPlayer.Character
+    if char and not char:FindFirstChild("HasBuso") then
+        pcall(function()
+            local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+            local commF = remotes and remotes:FindFirstChild("CommF_")
+            if commF then commF:InvokeServer("Buso") end
+        end)
+    end
+end
+
+local function ExecuteFastAttack()
+    if not Engine.FastAttackActive or Engine.IsHopping or Engine.RealkidRunning then return end
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local hitList = {}
+    local primaryTargetHead = nil
+
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if enemiesFolder then
+        for _, mob in ipairs(enemiesFolder:GetChildren()) do
+            local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            if mob ~= char and mobRoot and mobHum and mobHum.Health > 0 then
+                if (root.Position - mobRoot.Position).Magnitude <= Engine.AttackRadius then
+                    table.insert(hitList, mob)
+                    if not primaryTargetHead and mob:FindFirstChild("Head") then primaryTargetHead = mob.Head end
+                end
+            end
+        end
+    end
+
+    local charsFolder = workspace:FindFirstChild("Characters")
+    if charsFolder then
+        for _, mob in ipairs(charsFolder:GetChildren()) do
+            local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            if mob ~= char and mobRoot and mobHum and mobHum.Health > 0 then
+                if (root.Position - mobRoot.Position).Magnitude <= Engine.AttackRadius then
+                    table.insert(hitList, mob)
+                    if not primaryTargetHead and mob:FindFirstChild("Head") then primaryTargetHead = mob.Head end
+                end
+            end
+        end
+    end
+
+    if #hitList == 0 then return end
+
+    local activeTool = char:FindFirstChildOfClass("Tool") or EquipCombatTool()
+    if not activeTool then return end
+
+    EnsureBuso()
+
+    local hitPartsArray = {}
+    for _, mob in ipairs(hitList) do
+        local mRoot = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChild("Head")
+        table.insert(hitPartsArray, { [1] = mob, [2] = mRoot })
+        table.insert(hitPartsArray, mob)
+    end
+
+    if not primaryTargetHead and hitList[1] then
+        primaryTargetHead = hitList[1]:FindFirstChild("Head") or hitList[1]:FindFirstChild("HumanoidRootPart")
+    end
+
+    local netModules = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+
+    pcall(function()
+        if netModules then
+            local netReq = require(netModules)
+            local regAttack = netReq:RemoteEvent("RegisterAttack", true)
+            local regHit = netReq:RemoteEvent("RegisterHit", true)
+            if regAttack and regHit then
+                regAttack:FireServer(0)
+                regHit:FireServer(primaryTargetHead, hitPartsArray, {}, "078da5141")
+            end
+        end
+    end)
+
+    if netModules then
+        local regAttackDirect = netModules:FindFirstChild("RE/RegisterAttack")
+        local regHitDirect = netModules:FindFirstChild("RE/RegisterHit")
+        if regAttackDirect and regAttackDirect:IsA("RemoteEvent") then regAttackDirect:FireServer() end
+        local callHash = tostring(LocalPlayer.UserId):sub(2, 4) .. tostring(coroutine.running()):sub(11, 15)
+        if regHitDirect and regHitDirect:IsA("RemoteEvent") and primaryTargetHead then
+            regHitDirect:FireServer(primaryTargetHead, hitPartsArray, {}, callHash)
+        end
+
+        if ObfuscatedRemote and RemoteId and primaryTargetHead then
+            local obfuscatedKey = string.gsub("RE/RegisterHit", ".", function(c)
+                return string.char(bit32.bxor(string.byte(c), math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1))
+            end)
+            local seedVal = 0
+            pcall(function() seedVal = netModules.seed:InvokeServer() * 2 end)
+            local payloadHash = bit32.bxor(RemoteId + 909090, seedVal)
+            pcall(function() ObfuscatedRemote:FireServer(obfuscatedKey, payloadHash, primaryTargetHead, hitPartsArray) end)
+        end
+    end
+end
+
+local faThread = task.spawn(function()
+    while true do
+        pcall(ExecuteFastAttack)
+        task.wait(0.05)
+    end
+end)
+table.insert(Engine.Threads, faThread)
+
+-- =========================================================================
+-- [BƯỚC 12] INVENTORY SCANNER & BỘ ĐỐI SOÁT TIẾN TRÌNH CDK CHUẨN XÁC 100%
+-- =========================================================================
+local InventoryEngine = {}
+InventoryEngine.__index = InventoryEngine
+
+local ScannerState = {
+    IsInitialized = false,
+    UserId = LocalPlayer.UserId,
+    LastSyncTimestamp = 0,
+    SyncDebounce = 0.25,
+    Materials = {},
+    Tools = {},
+    Weapons = {}
+}
+
+local CachedCDKStatus = {
+    DoorBroken = true,
+    DoorStatus = "Blocked / Incomplete",
+    Yama1 = false, Yama2 = false, Yama3 = false, YamaPedestalBurned = false,
+    Tushita1 = false, Tushita2 = false, Tushita3 = false, TushitaPedestalBurned = false,
+    RawEvil = 0,
+    RawGood = 0,
+    AlucardFragments = 0,
+    TotalCompleted = 0,
+    SyncSource = "Direct Server Remote",
+    YamaDone = false,
+    TushitaDone = false,
+    AllDone = false,
+    ReadyBoss = false,
+    CurrentYamaTrial = "Chưa nhận",
+    CurrentTushitaTrial = "Chưa nhận",
+    Summary = ""
+}
+
+local function SafeRequire(moduleInstance)
+    if not moduleInstance or not moduleInstance:IsA("ModuleScript") then return nil end
+    local ok, result = pcall(require, moduleInstance)
+    return ok and result or nil
+end
+
+local function GetIRSComponents()
+    local rep = game:GetService("ReplicatedStorage")
+    local irsInst = rep:FindFirstChild("ItemReplicationService")
+    local cfgInst = rep:FindFirstChild("ItemConfig")
+
+    local IRS = SafeRequire(irsInst)
+    local Cfg = SafeRequire(cfgInst)
+    local Storage = nil
+    if cfgInst and cfgInst:FindFirstChild("Storage") then Storage = SafeRequire(cfgInst.Storage) end
+    local Keys = nil
+    if irsInst and irsInst:FindFirstChild("KEYS") then Keys = SafeRequire(irsInst.KEYS) end
+    return IRS, Cfg, Storage, Keys
+end
+
+function InventoryEngine.New()
+    local self = setmetatable({}, InventoryEngine)
+    self:_Initialize()
+    return self
+end
+
+function InventoryEngine:_Initialize()
+    if ScannerState.IsInitialized then return end
+
+    local CommE = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommE")
+    if CommE and CommE:IsA("RemoteEvent") then
+        local conn = CommE.OnClientEvent:Connect(function(...)
+            local packet = {...}
+            if packet[1] and typeof(packet[1]) == "string" and string.find(packet[1], "Item") then
+                self:Sync()
+            end
+        end)
+        table.insert(Engine.Connections, conn)
+    end
+
+    local bp = LocalPlayer:FindFirstChild("Backpack") or LocalPlayer:WaitForChild("Backpack", 2)
+    if bp then
+        local c1 = bp.ChildAdded:Connect(function() self:_FastToolIndex() end)
+        local c2 = bp.ChildRemoved:Connect(function() self:_FastToolIndex() end)
+        table.insert(Engine.Connections, c1)
+        table.insert(Engine.Connections, c2)
+    end
+
+    self:Sync()
+    ScannerState.IsInitialized = true
+end
+
+function InventoryEngine:_FastToolIndex()
+    table.clear(ScannerState.Tools)
+    local function IndexContainer(container)
+        if not container then return end
+        for _, item in ipairs(container:GetChildren()) do
+            if item:IsA("Tool") then ScannerState.Tools[item.Name] = item end
+        end
+    end
+    IndexContainer(LocalPlayer:FindFirstChild("Backpack"))
+    IndexContainer(LocalPlayer.Character)
+end
+
+function InventoryEngine:Sync()
+    local now = os.clock()
+    if now - ScannerState.LastSyncTimestamp < ScannerState.SyncDebounce then return true end
+    ScannerState.LastSyncTimestamp = now
+
+    table.clear(ScannerState.Materials)
+    table.clear(ScannerState.Weapons)
+    self:_FastToolIndex()
+
+    local IRS, ItemConfig, ItemConfigStorage, KeysModule = GetIRSComponents()
+    local memoryCacheHit = false
+
+    if IRS and IRS._UserCache then
+        local userItems = IRS._UserCache[ScannerState.UserId]
+        if userItems and typeof(userItems.GetItems) == "function" then
+            local quantityKey = KeysModule and KeysModule.QUANTITY or "Quantity"
+            local masteryKey = KeysModule and KeysModule.MASTERY or "Mastery"
+
+            local quantities = userItems:GetItems(quantityKey)
+            local masteries = userItems:GetItems(masteryKey)
+
+            local masteryMap = {}
+            if masteries then
+                for _, entry in pairs(masteries) do
+                    if entry.ItemId and entry.Value then masteryMap[entry.ItemId] = entry.Value end
+                end
+            end
+
+            if quantities then
+                for _, itemEntry in pairs(quantities) do
+                    local itemId = itemEntry.ItemId
+                    local count = itemEntry.Value or 0
+                    local label = nil
+                    local category = "Unknown"
+
+                    if ItemConfigStorage and typeof(ItemConfigStorage.match) == "function" then
+                        pcall(function()
+                            local matchData = ItemConfigStorage.match(itemId):unwrap()
+                            if matchData and matchData.Index then
+                                label = matchData.Index.DebugLabel or matchData.Index.StorageKey
+                                category = matchData.Display and matchData.Display.Category or "Unknown"
+                            end
+                        end)
+                    end
+
+                    label = label and label:gsub(" %[.-%]", "") or tostring(itemId)
+
+                    if category == "Material" or count > 1 or string.find(label:lower(), "fractal") or string.find(label:lower(), "alucard") then
+                        ScannerState.Materials[label] = count
+                    end
+
+                    ScannerState.Weapons[label] = {
+                        Category = category,
+                        Mastery = masteryMap[itemId] or 0,
+                        Quantity = count
+                    }
+                end
+                memoryCacheHit = true
+            end
+        end
+    end
+
+    if not memoryCacheHit then
+        local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
+        if commF and commF:IsA("RemoteFunction") then
+            local ok, inventoryData = pcall(function() return commF:InvokeServer("getInventory") end)
+            if ok and typeof(inventoryData) == "table" then
+                for _, item in pairs(inventoryData) do
+                    local name = item.Name or item.Item or "Unknown"
+                    local count = item.Count or item.Value or 1
+                    local itemType = item.Type or "Unknown"
+
+                    if itemType == "Material" or string.find(tostring(name):lower(), "fractal") or string.find(tostring(name):lower(), "alucard") then
+                        ScannerState.Materials[name] = count
+                    end
+
+                    ScannerState.Weapons[name] = {
+                        Category = itemType,
+                        Mastery = item.Mastery or 0,
+                        Quantity = count
+                    }
+                end
+            end
+        end
+    end
+
+    return true
+end
+
+function InventoryEngine:GetSwordMastery(swordName)
+    self:Sync()
+    local char = LocalPlayer.Character
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+
+    local itemTool = (char and char:FindFirstChild(swordName)) or (bp and bp:FindFirstChild(swordName))
+    if itemTool and itemTool:FindFirstChild("Level") then
+        return tonumber(itemTool.Level.Value) or 0
+    end
+
+    for name, data in pairs(ScannerState.Weapons) do
+        if name:lower():find(swordName:lower()) and typeof(data) == "table" and data.Mastery then
+            return tonumber(data.Mastery) or 0
+        end
+    end
+
+    pcall(function()
+        ReplicatedStorage.Remotes.CommF_:InvokeServer("LoadItem", swordName)
+    end)
+    local toolRef = (char and char:FindFirstChild(swordName)) or (bp and bp:FindFirstChild(swordName))
+    if toolRef and toolRef:FindFirstChild("Level") then
+        return tonumber(toolRef.Level.Value) or 0
+    end
+
+    return 0
+end
+
+function InventoryEngine:HasMirrorFractal()
+    self:Sync()
+    for matName, count in pairs(ScannerState.Materials) do
+        if string.find(matName:lower(), "mirror fractal") then return true, count end
+    end
+    for itemName, data in pairs(ScannerState.Weapons) do
+        if string.find(itemName:lower(), "mirror fractal") then return true, (typeof(data) == "table" and data.Quantity) or 1 end
+    end
+    for toolName, _ in pairs(ScannerState.Tools) do
+        if string.find(toolName:lower(), "mirror fractal") then return true, 1 end
+    end
+    return false, 0
+end
+
+function InventoryEngine:GetAlucardFragmentCount()
+    self:Sync()
+    for matName, count in pairs(ScannerState.Materials) do
+        if string.find(matName:lower(), "alucard fragment") or string.find(matName:lower(), "alucard") then
+            return tonumber(count) or 0
+        end
+    end
+    for itemName, data in pairs(ScannerState.Weapons) do
+        if string.find(itemName:lower(), "alucard fragment") or string.find(itemName:lower(), "alucard") then
+            return tonumber(typeof(data) == "table" and data.Quantity) or 1
+        end
+    end
+    for toolName, item in pairs(ScannerState.Tools) do
+        if string.find(toolName:lower(), "alucard fragment") or string.find(toolName:lower(), "alucard") then
+            if item:FindFirstChild("Count") then
+                return tonumber(item.Count.Value) or 1
+            end
+            return 1
+        end
+    end
+
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp and bp:FindFirstChild("Alucard Fragment") and bp["Alucard Fragment"]:FindFirstChild("Count") then
+        return tonumber(bp["Alucard Fragment"].Count.Value) or 0
+    end
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Alucard Fragment") and char["Alucard Fragment"]:FindFirstChild("Count") then
+        return tonumber(char["Alucard Fragment"].Count.Value) or 0
+    end
+
+    return 0
+end
+
+function InventoryEngine:HasItem(queryName)
+    self:Sync()
+    local target = queryName:lower()
+
+    if ScannerState.Weapons[queryName] then return true end
+    for name, _ in pairs(ScannerState.Weapons) do
+        if name:lower():find(target) then return true end
+    end
+    for name, _ in pairs(ScannerState.Materials) do
+        if name:lower():find(target) then return true end
+    end
+    for name, _ in pairs(ScannerState.Tools) do
+        if name:lower():find(target) then return true end
+    end
+
+    local char = LocalPlayer.Character
+    if char then
+        for _, obj in ipairs(char:GetChildren()) do
+            if string.find(string.lower(obj.Name), target) then return true end
+        end
+    end
+
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, obj in ipairs(bp:GetChildren()) do
+            if string.find(string.lower(obj.Name), target) then return true end
+        end
+    end
+
+    return false
+end
+
+function InventoryEngine:GetCDKQuestStatus()
+    local fragments = self:GetAlucardFragmentCount()
+    CachedCDKStatus.AlucardFragments = fragments
+
+    -- 1. Kiểm tra nếu đã có Cursed Dual Katana
+    if self:HasItem("Cursed Dual Katana") or (self:GetSwordMastery("Cursed Dual Katana") > 0) then
+        CachedCDKStatus.DoorBroken = true
+        CachedCDKStatus.DoorStatus = "Unlocked & Obtained"
+        CachedCDKStatus.Yama1 = true
+        CachedCDKStatus.Yama2 = true
+        CachedCDKStatus.Yama3 = true
+        CachedCDKStatus.YamaPedestalBurned = true
+        CachedCDKStatus.Tushita1 = true
+        CachedCDKStatus.Tushita2 = true
+        CachedCDKStatus.Tushita3 = true
+        CachedCDKStatus.TushitaPedestalBurned = true
+        CachedCDKStatus.YamaDone = true
+        CachedCDKStatus.TushitaDone = true
+        CachedCDKStatus.AllDone = true
+        CachedCDKStatus.ReadyBoss = true
+        CachedCDKStatus.TotalCompleted = 6
+        CachedCDKStatus.SyncSource = "Inventory Verified"
+        CachedCDKStatus.Summary = "👑 ĐÃ HOÀN TẤT VÀ SỞ HỮU CURSED DUAL KATANA!"
+        return CachedCDKStatus
+    end
+
+    -- 2. Kiểm tra trạng thái cửa phòng cuộn giấy tại Turtle Island
+    CachedCDKStatus.DoorBroken = true
+    pcall(function()
+        local cursedMap = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Turtle") and workspace.Map.Turtle:FindFirstChild("Cursed")
+        if cursedMap and cursedMap:FindFirstChild("Breakable") then
+            CachedCDKStatus.DoorBroken = false
+        end
+    end)
+
+    pcall(function()
+        local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
+        if commF then
+            local doorProgress = commF:InvokeServer("CDKQuest", "OpenDoor")
+            if doorProgress == "can" or doorProgress == true or fragments >= 6 then
+                CachedCDKStatus.DoorStatus = "Ready to Open"
+            else
+                CachedCDKStatus.DoorStatus = CachedCDKStatus.DoorBroken and "Door Opened" or "Blocked / Incomplete"
+            end
+        end
+    end)
+
+    -- 3. Đọc trực tiếp dữ liệu gói tin CDKQuest từ Server
+    local rawEvil = 0
+    local rawGood = 0
+    pcall(function()
+        local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
+        if commF then
+            local data = commF:InvokeServer("CDKQuest", "Progress")
+            if typeof(data) ~= "table" then data = commF:InvokeServer("CDKQuest") end
+
+            if typeof(data) == "table" then
+                rawEvil = tonumber(data.Evil or data.evil or data.Yama or 0) or (data.Evil == true and 3) or 0
+                rawGood = tonumber(data.Good or data.good or data.Tushita or 0) or (data.Good == true and 3) or 0
+            end
+        end
+    end)
+
+    CachedCDKStatus.RawEvil = rawEvil
+    CachedCDKStatus.RawGood = rawGood
+
+    local evilDone = 0
+    local goodDone = 0
+
+    if rawEvil >= 3 then evilDone = 3
+    elseif rawEvil == 2 or rawEvil == -5 then evilDone = 2
+    elseif rawEvil == 1 or rawEvil == -4 then evilDone = 1 end
+
+    if rawGood >= 3 then goodDone = 3
+    elseif rawGood == 2 or rawGood == -5 then goodDone = 2
+    elseif rawGood == 1 or rawGood == -4 then goodDone = 1 end
+
+    -- =========================================================================
+    -- BỘ ĐỐI SOÁT TUYỆT ĐỐI TIẾN TRÌNH 6 NHIỆM VỤ (ĐỒNG BỘ MẢNH ALUCARD)
+    -- =========================================================================
+    local totalProgress = math.clamp(math.max(evilDone + goodDone, fragments), 0, 6)
+
+    if totalProgress >= 6 then
+        evilDone = 3
+        goodDone = 3
+    elseif totalProgress == 5 then
+        if evilDone >= 3 then
+            goodDone = 2
+        elseif goodDone >= 3 then
+            evilDone = 2
+        else
+            evilDone = 3
+            goodDone = 2
+        end
+    elseif totalProgress == 4 then
+        if evilDone >= 3 then
+            goodDone = 1
+        elseif goodDone >= 2 then
+            evilDone = 2
+        else
+            evilDone = 3
+            goodDone = 1
+        end
+    elseif totalProgress == 3 then
+        if goodDone > 0 then
+            evilDone = math.max(0, 3 - goodDone)
+        else
+            evilDone = 3
+            goodDone = 0
+        end
+    elseif totalProgress == 2 then
+        if goodDone > 0 then
+            evilDone = math.max(0, 2 - goodDone)
+        else
+            evilDone = 2
+            goodDone = 0
+        end
+    elseif totalProgress == 1 then
+        if goodDone > 0 then
+            evilDone = 0
+        else
+            evilDone = 1
+        end
+    end
+
+    CachedCDKStatus.TotalCompleted = totalProgress
+    CachedCDKStatus.evilDone = evilDone
+    CachedCDKStatus.goodDone = goodDone
+
+    -- Cập nhật cờ tiến trình Yama
+    CachedCDKStatus.Yama1 = (evilDone >= 1)
+    CachedCDKStatus.Yama2 = (evilDone >= 2)
+    CachedCDKStatus.Yama3 = (evilDone >= 3)
+    CachedCDKStatus.YamaPedestalBurned = (rawEvil >= 4 or (evilDone >= 3 and totalProgress >= 6))
+
+    if evilDone == 0 then CachedCDKStatus.CurrentYamaTrial = "Trial 1: Pain & Suffering"
+    elseif evilDone == 1 then CachedCDKStatus.CurrentYamaTrial = "Trial 2: Haze of Misery"
+    elseif evilDone == 2 then CachedCDKStatus.CurrentYamaTrial = "Trial 3: Fear the Reaper"
+    elseif CachedCDKStatus.YamaPedestalBurned then CachedCDKStatus.CurrentYamaTrial = "Hoàn thành 100% cuộn Yama"
+    else CachedCDKStatus.CurrentYamaTrial = "Đã xong 3 Trial (Chờ đốt bệ)" end
+
+    -- Cập nhật cờ tiến trình Tushita
+    CachedCDKStatus.Tushita1 = (goodDone >= 1)
+    CachedCDKStatus.Tushita2 = (goodDone >= 2)
+    CachedCDKStatus.Tushita3 = (goodDone >= 3)
+    CachedCDKStatus.TushitaPedestalBurned = (rawGood >= 4 or (goodDone >= 3 and totalProgress >= 6))
+
+    if goodDone == 0 then CachedCDKStatus.CurrentTushitaTrial = "Trial 1: Dokkan"
+    elseif goodDone == 1 then CachedCDKStatus.CurrentTushitaTrial = "Trial 2: With the Wind (Raid)"
+    elseif goodDone == 2 then CachedCDKStatus.CurrentTushitaTrial = "Trial 3: Soulless (Cake Queen)"
+    elseif CachedCDKStatus.TushitaPedestalBurned then CachedCDKStatus.CurrentTushitaTrial = "Hoàn thành 100% cuộn Tushita"
+    else CachedCDKStatus.CurrentTushitaTrial = "Đã xong 3 Trial (Chờ đốt bệ)" end
+
+    CachedCDKStatus.YamaDone = (evilDone >= 3)
+    CachedCDKStatus.TushitaDone = (goodDone >= 3)
+    CachedCDKStatus.AllDone = (evilDone >= 3 and goodDone >= 3)
+    CachedCDKStatus.ReadyBoss = (CachedCDKStatus.YamaPedestalBurned and CachedCDKStatus.TushitaPedestalBurned) or (totalProgress >= 6)
+
+    if CachedCDKStatus.ReadyBoss then
+        CachedCDKStatus.Summary = string.format("🟢 Sẵn sàng diệt Boss CDK! [%d/6 Mảnh Alucard]", fragments)
+    elseif CachedCDKStatus.AllDone then
+        CachedCDKStatus.Summary = string.format("🟡 Xong 6 Trial! Đang đốt 2 bệ [%d/6 Mảnh Alucard]", fragments)
+    else
+        CachedCDKStatus.Summary = string.format("⚔️ Xong: %d/6 [%d Mảnh Alucard] | Yama: [%d/3] | Tushita: [%d/3]", totalProgress, fragments, evilDone, goodDone)
+    end
+
+    return CachedCDKStatus
+end
+
+local Scanner = InventoryEngine.New()
+
+-- =========================================================================
+-- [BƯỚC 12.5] CẢM BIẾN REAL-TIME & KIỂM TRA HEAVENLY DIMENSION
+-- =========================================================================
+local CDKTargetsState = {
+    LastRaidAlert = 0,
+    RaidActive = false,
+    Targets = {
+        ["Soul Reaper"] = { Found = false, Health = 0, MaxHealth = 0, Distance = 0, Model = nil, Extra = "Dormant" },
+        ["Cake Queen"] = { Found = false, Health = 0, MaxHealth = 0, Distance = 0, Model = nil, Extra = "Dormant" },
+        ["Castle Raid"] = { Found = false, MobCount = 0, Distance = 0, TimeSinceAlert = 0, Extra = "No active raid" }
+    }
+}
+
+local CASTLE_POS = Vector3.new(-5545, 314, -2964)
+local CASTLE_ALT_POS = Vector3.new(-5000, 350, -3035)
+
+local function ScanEntityMobFuzzy(targetSubName)
+    targetSubName = string.lower(targetSubName)
+    local containers = { workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters"), ReplicatedStorage }
+    for _, container in ipairs(containers) do
+        if container then
+            for _, mob in ipairs(container:GetChildren()) do
+                if mob:IsA("Model") and string.find(string.lower(mob.Name), targetSubName, 1, true) then
+                    local hum = mob:FindFirstChildOfClass("Humanoid")
+                    local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+                    if hum and hum.Health > 0 and hrp then
+                        return mob, hum, hrp
+                    end
+                end
+            end
+        end
+    end
+    return nil, nil, nil
+end
+
+local function IsInHeavenlyDimension()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    local map = workspace:FindFirstChild("Map")
+    local hd = (map and (map:FindFirstChild("HeavenlyDimension") or map:FindFirstChild("Heavenly Dimension") or map:FindFirstChild("HeavenDimension")))
+               or workspace:FindFirstChild("HeavenlyDimension")
+               or workspace:FindFirstChild("Heavenly Dimension")
+    if hd then
+        local primary = hd.PrimaryPart or hd:FindFirstChildWhichIsA("BasePart", true)
+        if primary and (hrp.Position - primary.Position).Magnitude < 3000 then
+            return true
+        end
+        return true
+    end
+
+    return false
+end
+
+local function ScanCastlePirateRaidRobust()
+    local raidMobCount = 0
+    local containers = { workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters"), ReplicatedStorage }
+    for _, container in ipairs(containers) do
+        if container then
+            for _, mob in ipairs(container:GetChildren()) do
+                if mob:IsA("Model") and not mob:GetAttribute("IsBoss") then
+                    local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+                    local hum = mob:FindFirstChildOfClass("Humanoid")
+                    if hrp and hum and hum.Health > 0 then
+                        local d1 = (hrp.Position - CASTLE_POS).Magnitude
+                        local d2 = (hrp.Position - CASTLE_ALT_POS).Magnitude
+                        if (d1 <= 1200 or d2 <= 1200) then
+                            local mobNameLower = string.lower(mob.Name)
+                            local isPirateName = string.find(mobNameLower, "pirate", 1, true) or string.find(mobNameLower, "raid", 1, true)
+                            local lv = mob:GetAttribute("Level") or (mob:FindFirstChild("Level") and tonumber(mob.Level.Value)) or 0
+
+                            if isPirateName or (lv > 0 and lv <= 1700) or (lv == 0 and d1 <= 800) then
+                                raidMobCount = raidMobCount + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return raidMobCount
+end
+
+local function UpdateCDKTargetSensors()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+    -- 1. Quét Soul Reaper (Yama 3)
+    local srModel, srHum, srHrp = ScanEntityMobFuzzy("soul reaper")
+    local hellDimension = (workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("HellDimension")) or workspace:FindFirstChild("HellDimension")
+    local sr = CDKTargetsState.Targets["Soul Reaper"]
+    if srModel and srHum and srHrp then
+        sr.Found = true
+        sr.Health = math.floor(srHum.Health)
+        sr.MaxHealth = math.max(1, math.floor(srHum.MaxHealth))
+        sr.Distance = hrp and math.floor((hrp.Position - srHrp.Position).Magnitude) or 0
+        sr.Model = srModel
+        sr.Extra = (hellDimension and "Hell Dimension Active") or "Spawned in Castle"
+    else
+        sr.Found = false
+        sr.Health = 0
+        sr.MaxHealth = 0
+        sr.Distance = 0
+        sr.Model = nil
+        sr.Extra = (hellDimension and "Hell Dimension Active") or "Not Spawned"
+    end
+
+    -- 2. Quét Cake Queen (Tushita 3)
+    local cqModel, cqHum, cqHrp = ScanEntityMobFuzzy("cake queen")
+    local inHeaven = IsInHeavenlyDimension()
+    local cq = CDKTargetsState.Targets["Cake Queen"]
+    if cqModel and cqHum and cqHrp then
+        cq.Found = true
+        cq.Health = math.floor(cqHum.Health)
+        cq.MaxHealth = math.max(1, math.floor(cqHum.MaxHealth))
+        cq.Distance = hrp and math.floor((hrp.Position - cqHrp.Position).Magnitude) or 0
+        cq.Model = cqModel
+        cq.Extra = (inHeaven and "Heaven Dimension Open") or "Alive at Ice Cream Land"
+    else
+        cq.Found = false
+        cq.Health = 0
+        cq.MaxHealth = 0
+        cq.Distance = 0
+        cq.Model = nil
+        cq.Extra = (inHeaven and "Heaven Dimension Open") or "Not Spawned"
+    end
+
+    -- 3. Quét Castle Pirate Raid (Tushita 2)
+    local mobCount = ScanCastlePirateRaidRobust()
+    local timeSince = os.time() - CDKTargetsState.LastRaidAlert
+    local isRaidActive = (mobCount > 0) or (CDKTargetsState.RaidActive and timeSince < 360)
+    local cr = CDKTargetsState.Targets["Castle Raid"]
+
+    cr.Found = isRaidActive
+    cr.MobCount = mobCount
+    cr.Distance = hrp and math.floor((hrp.Position - CASTLE_POS).Magnitude) or 0
+
+    if mobCount > 0 then
+        cr.Extra = string.format("Active: %d Mobs Alive", mobCount)
+    elseif CDKTargetsState.RaidActive and timeSince < 360 then
+        cr.Extra = string.format("Alert Active (~%ds ago)", timeSince)
+    else
+        cr.Extra = "No Pirate Raid"
+        CDKTargetsState.RaidActive = false
+    end
+
+    return CDKTargetsState.Targets
+end
+
+-- Hook thông báo Server Blox Fruits bắt sự kiện Pirate Raid
+pcall(function()
+    local notifModule = ReplicatedStorage:FindFirstChild("Notification")
+    if notifModule then
+        local originalNew = require(notifModule).new
+        if hookfunction then
+            local hook
+            hook = hookfunction(originalNew, function(a1, a2)
+                local str = string.lower(tostring(a1 or "") .. tostring(a2 or ""))
+                if string.find(str, "been spotted approaching") or string.find(str, "pirates are raiding") then
+                    CDKTargetsState.LastRaidAlert = os.time()
+                    CDKTargetsState.RaidActive = true
+                elseif string.find(str, "the pirates have been defeated") or string.find(str, "job") then
+                    CDKTargetsState.RaidActive = false
+                end
+                return hook(a1, a2)
+            end)
+            table.insert(Engine.Connections, {
+                Disconnect = function()
+                    pcall(hookfunction, originalNew, originalNew)
+                end
+            })
+        end
+    end
+end)
+
+-- DAEMON RIÊNG BIỆT: CẢM BIẾN BOSS & CASTLE RAID
+local sensorDaemonThread = task.spawn(function()
+    while Engine.IsRunning do
+        if Engine.InCDKMode then
+            local liveTargets = UpdateCDKTargetSensors()
+            local srData = liveTargets["Soul Reaper"]
+            local cqData = liveTargets["Cake Queen"]
+            local crData = liveTargets["Castle Raid"]
+
+            if srData.Found then
+                local pct = srData.MaxHealth > 0 and math.floor((srData.Health / srData.MaxHealth) * 100) or 0
+                lblCDKSoulReaper.Text = string.format("👻 Soul Reaper (Yama 3): 🟢 ĐÃ SPAWN [%d%% HP | %d studs | %s]", pct, srData.Distance, srData.Extra)
+                lblCDKSoulReaper.TextColor3 = Color3.fromRGB(80, 255, 140)
+            else
+                lblCDKSoulReaper.Text = string.format("👻 Soul Reaper (Yama 3): 🔴 CHƯA SPAWN (%s)", srData.Extra)
+                lblCDKSoulReaper.TextColor3 = srData.Extra:find("Active") and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(200, 180, 255)
+            end
+
+            if cqData.Found then
+                local pct = cqData.MaxHealth > 0 and math.floor((cqData.Health / cqData.MaxHealth) * 100) or 0
+                lblCDKCakeQueen.Text = string.format("🍰 Cake Queen (Tushita 3): 🟢 ĐÃ SPAWN [%d%% HP | %d studs | %s]", pct, cqData.Distance, cqData.Extra)
+                lblCDKCakeQueen.TextColor3 = Color3.fromRGB(80, 255, 140)
+            else
+                lblCDKCakeQueen.Text = string.format("🍰 Cake Queen (Tushita 3): 🔴 CHƯA SPAWN (%s)", cqData.Extra)
+                lblCDKCakeQueen.TextColor3 = cqData.Extra:find("Open") and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(255, 180, 210)
+            end
+
+            if crData.Found then
+                lblCDKCastleRaid.Text = string.format("🏰 Castle Raid (Tushita 2): 🟢 ĐANG DIỄN RA! [%s | %d studs]", crData.Extra, crData.Distance)
+                lblCDKCastleRaid.TextColor3 = Color3.fromRGB(255, 120, 50)
+            else
+                lblCDKCastleRaid.Text = string.format("🏰 Castle Raid (Tushita 2): ⚪ BÌNH THƯỜNG (%s)", crData.Extra)
+                lblCDKCastleRaid.TextColor3 = Color3.fromRGB(180, 190, 200)
+            end
+        end
+        task.wait(0.2)
+    end
+end)
+table.insert(Engine.Threads, sensorDaemonThread)
+
+-- =========================================================================
+-- [BƯỚC 13] TIÊU DIỆT DOUGH KING & CƠ CHẾ FARM BONE HAUNTED CASTLE
+-- =========================================================================
+local function GetDoughKingMob()
+    local enemies = workspace:FindFirstChild("Enemies")
+    if enemies then
+        local dk = enemies:FindFirstChild("Dough King")
+        if dk and dk:FindFirstChild("Humanoid") and dk.Humanoid.Health > 0 and dk:FindFirstChild("HumanoidRootPart") then
+            return dk
+        end
+    end
+    return nil
+end
+
+local function KillDoughKingTarget(doughMob)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local mobRoot = doughMob and doughMob:FindFirstChild("HumanoidRootPart")
+    local mobHum = doughMob and doughMob:FindFirstChildOfClass("Humanoid")
+
+    if not hrp or not hum or hum.Health <= 0 or not mobRoot or not mobHum or mobHum.Health <= 0 then return end
+
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then part.CanCollide = false end
+    end
+
+    local head = char:FindFirstChild("Head")
+    if head and not head:FindFirstChild("axiom_bv") then
+        local bv = Instance.new("BodyVelocity")
+        bv.Name = "axiom_bv"
+        bv.MaxForce = Vector3.new(0, math.huge, 0)
+        bv.Velocity = Vector3.zero
+        bv.Parent = head
+    end
+
+    local hoverPos = mobRoot.Position + Vector3.new(0, 14, 0)
+    hrp.CFrame = CFrame.new(hoverPos, mobRoot.Position)
+end
+
+local function TakeHauntedBoneQuest(mobName)
+    pcall(function()
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        local commF = remotes and remotes:FindFirstChild("CommF_")
+        if not commF then return end
+
+        if mobName == "Reborn Skeleton" then
+            commF:InvokeServer("StartQuest", "HauntedQuest1", 1)
+        elseif mobName == "Living Zombie" then
+            commF:InvokeServer("StartQuest", "HauntedQuest1", 2)
+        elseif mobName == "Demonic Soul" then
+            commF:InvokeServer("StartQuest", "HauntedQuest2", 1)
+        elseif mobName == "Posessed Mummy" then
+            commF:InvokeServer("StartQuest", "HauntedQuest2", 2)
+        end
+    end)
+end
+
+local function ExecuteBoneFarmForSword(swordName, currentMastery)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum.Health <= 0 then return end
+
+    EquipSpecificSword(swordName)
+
+    local targetMob = nil
+    local shortestDist = math.huge
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+
+    if enemiesFolder then
+        for _, mob in ipairs(enemiesFolder:GetChildren()) do
+            local mHum = mob:FindFirstChildOfClass("Humanoid")
+            local mRoot = mob:FindFirstChild("HumanoidRootPart")
+            if mRoot and mHum and mHum.Health > 0 and table.find(BONE_NPCS, mob.Name) then
+                local d = (hrp.Position - mRoot.Position).Magnitude
+                if d < shortestDist then
+                    shortestDist = d
+                    targetMob = mob
+                end
+            end
+        end
+    end
+
+    if targetMob and targetMob:FindFirstChild("HumanoidRootPart") and targetMob:FindFirstChildOfClass("Humanoid") then
+        TakeHauntedBoneQuest(targetMob.Name)
+
+        local mPos = targetMob.HumanoidRootPart.Position + Vector3.new(0, 14, 0)
+        local distToMob = (hrp.Position - mPos).Magnitude
+
+        if distToMob > 60 then
+            TweenToPosition(mPos, 240)
+        else
+            hrp.CFrame = CFrame.new(mPos, targetMob.HumanoidRootPart.Position)
+            BringNearbyMobs(targetMob.HumanoidRootPart.CFrame, targetMob.Name, 3)
+            EnsureBuso()
+        end
+    else
+        if (hrp.Position - POS_HAUNTED_CASTLE).Magnitude > 80 then
+            lblStatus.Text = string.format("Trạng thái: 🏰 Bay về Haunted Castle cày [%s: %d/350]...", swordName, currentMastery)
+            TweenToPosition(POS_HAUNTED_CASTLE, 240)
+        end
+    end
+end
+
+-- =========================================================================
+-- [BƯỚC 14] TỰ ĐỘNG BẬT ĐUỐC KHI CÓ HOLY TORCH
+-- =========================================================================
+local function AutoFire5Torches()
+    if Engine.TorchesFired then return end
+    Engine.TorchesFired = true
+
+    task.spawn(function()
+        lblStatus.Text = "Trạng thái: 🔥 ĐÃ CÓ HOLY TORCH! Đang tự động bắn 5 đuốc..."
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        local commF = remotes and remotes:FindFirstChild("CommF_")
+        if not commF then return end
+
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+
+        if hum and bp and bp:FindFirstChild("Holy Torch") then
+            hum:EquipTool(bp["Holy Torch"])
+            task.wait(0.2)
+        end
+
+        for i = 1, 5 do
+            commF:InvokeServer("TushitaProgress", "Torch", i)
+            task.wait(0.2)
+        end
+        lblStatus.Text = "Trạng thái: ✅ ĐÃ TỰ ĐỘNG THẮP XONG 5 ĐUỐC! Cổng Longma đã mở sẵn."
+    end)
+end
+
+local function WatchForHolyTorch(container)
+    if not container then return end
+    local conn = container.ChildAdded:Connect(function(child)
+        if child.Name == "Holy Torch" and Engine.IsRunning then
+            AutoFire5Torches()
+        end
+    end)
+    table.insert(Engine.Connections, conn)
+end
+
+local bpObj = LocalPlayer:FindFirstChild("Backpack") or LocalPlayer:WaitForChild("Backpack", 2)
+if bpObj then WatchForHolyTorch(bpObj) end
+if LocalPlayer.Character then WatchForHolyTorch(LocalPlayer.Character) end
+
+local charConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
+    WatchForHolyTorch(newChar)
+    Engine.AtMirrorPoint = false
+end)
+table.insert(Engine.Connections, charConn)
+
+function Engine:Unload()
+    self.IsRunning = false
+    self.FastAttackActive = false
+    self.NightHubRunning = false
+    self.RealkidRunning = false
+    self.IsHopping = false
+    self.CDKBossStartTime = nil
+    getgenv()._NightHubExecuted = nil
+
+    if self.CurrentTween then pcall(function() self.CurrentTween:Cancel() end) end
+
+    local char = LocalPlayer.Character
+    if char then
+        local head = char:FindFirstChild("Head")
+        if head and head:FindFirstChild("axiom_bv") then head.axiom_bv:Destroy() end
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = true end
+        end
+    end
+
+    for _, conn in ipairs(self.Connections) do
+        if conn and typeof(conn) == "RBXScriptConnection" then pcall(function() conn:Disconnect() end) end
+    end
+    table.clear(self.Connections)
+
+    for _, th in ipairs(self.Threads) do
+        if th and coroutine.status(th) ~= "dead" then pcall(task.cancel, th) end
+    end
+    table.clear(self.Threads)
+
+    for _, inst in ipairs(self.Instances) do pcall(function() inst:Destroy() end) end
+    table.clear(self.Instances)
+
+    getgenv()._AxiomTushitaMaster = nil
+end
+
+btnUnload.MouseButton1Click:Connect(function() Engine:Unload() end)
+
+-- =========================================================================
+-- [BƯỚC 15] KIỂM TRA SUBMERGED BAN ĐẦU
+-- =========================================================================
+CheckAndTriggerInitialSubmergedMode()
+
+-- =========================================================================
+-- [BƯỚC 16] BỘ ĐIỀU PHỐI ĐA PHA & QUẢN LÝ TIẾN TRÌNH CDK PHẢN XẠ NHANH
+-- =========================================================================
+local SharedCDK = {
+    Data = nil,
+    NextRefreshTime = os.clock(),
+    IsFetching = false,
+    FetchStartedAt = 0
+}
+
+local Tushita3Controller = {
+    CakeQueenSeen = false,
+    WaitingForHeavenly = false,
+    WaitStartTime = 0
+}
+
+local function RenderCDKQuestLabels(cdkProg)
+    if not cdkProg then return end
+
+    lblCDKYama1.Text = "1. Yama: Đau Đớn (Pain & Suffering): " .. (cdkProg.Yama1 and "🟢 XONG" or "🔴 CHƯA")
+    lblCDKYama1.TextColor3 = cdkProg.Yama1 and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 100, 100)
+
+    lblCDKYama2.Text = "2. Yama: Sương Mù (Haze of Misery): " .. (cdkProg.Yama2 and "🟢 XONG" or "🔴 CHƯA")
+    lblCDKYama2.TextColor3 = cdkProg.Yama2 and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 100, 100)
+
+    local yama3Text = "🔴 CHƯA"
+    if cdkProg.YamaPedestalBurned then
+        yama3Text = "🟢 ĐÃ ĐỐT BỆ YAMA"
+    elseif cdkProg.Yama3 then
+        yama3Text = "🟡 XONG TRIAL (CHỜ ĐỐT)"
+    end
+    lblCDKYama3.Text = "3. Yama: Tử Thần (Fear the Reaper): " .. yama3Text
+    lblCDKYama3.TextColor3 = cdkProg.Yama3 and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 100, 100)
+
+    lblCDKTushita1.Text = "4. Tushita: Thuyền Trưởng (Dokkan): " .. (cdkProg.Tushita1 and "🟢 XONG" or "🔴 CHƯA")
+    lblCDKTushita1.TextColor3 = cdkProg.Tushita1 and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 100, 100)
+
+    lblCDKTushita2.Text = "5. Tushita: Đột Kích Lâu Đài (With the Wind): " .. (cdkProg.Tushita2 and "🟢 XONG" or "🔴 CHƯA")
+    lblCDKTushita2.TextColor3 = cdkProg.Tushita2 and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 100, 100)
+
+    local tushita3Text = "🔴 CHƯA"
+    if cdkProg.TushitaPedestalBurned then
+        tushita3Text = "🟢 ĐÃ ĐỐT BỆ TUSHITA"
+    elseif cdkProg.Tushita3 then
+        tushita3Text = "🟡 XONG TRIAL (CHỜ ĐỐT)"
+    end
+    lblCDKTushita3.Text = "6. Tushita: Nữ Hoàng Bánh (Soulless): " .. tushita3Text
+    lblCDKTushita3.TextColor3 = cdkProg.Tushita3 and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 100, 100)
+end
+
+-- HÀM ĐIỀU PHỐI VÀ CẬP NHẬT TRẠNG THÁI CDK TOÀN DIỆN (CHẠY LIÊN TỤC MỖI TICK & REFRESH 5S)
+local function ProcessCDKPipeline(cdkProg, timeDisplay)
+    if not cdkProg then return end
+    RenderCDKQuestLabels(cdkProg)
+
+    local desiredStage = nil
+    local desiredHub = "RealKid"
+    local desiredConfig = nil
+
+    if not cdkProg.YamaDone then
+        Engine.CDKBossStartTime = nil
+        if cdkProg.evilDone == 0 then
+            desiredStage = "Yama1"
+            desiredHub = "RealKid"
+            desiredConfig = REALKID_CONFIG_YAMA_BASE
+            lblCDKBoss.Text = "👑 Cursed Skeleton Boss: ⚪ Đang làm Yama 1: Pain & Suffering..."
+            lblCDKBoss.TextColor3 = Color3.fromRGB(180, 190, 200)
+            lblStatus.Text = string.format("Trạng thái: ⚔️ [GIAI ĐOẠN 1: YAMA 1] RealKid đang làm Pain & Suffering (Tụt máu dưới 15%% HP)... %s", timeDisplay)
+        elseif cdkProg.evilDone == 1 then
+            desiredStage = "Yama2"
+            desiredHub = "RealKid"
+            desiredConfig = REALKID_CONFIG_YAMA_BASE
+            lblCDKBoss.Text = "👑 Cursed Skeleton Boss: ⚪ Đang làm Yama 2: Haze of Misery..."
+            lblCDKBoss.TextColor3 = Color3.fromRGB(180, 190, 200)
+            lblStatus.Text = string.format("Trạng thái: ⚔️ [GIAI ĐOẠN 1: YAMA 2] RealKid đang làm Haze of Misery (Lùng chém quái chấm tím)... %s", timeDisplay)
+        else
+            desiredStage = "Yama3"
+            desiredHub = "RealKid"
+            desiredConfig = REALKID_CONFIG_YAMA_HOP
+            lblCDKBoss.Text = "👑 Cursed Skeleton Boss: ⚪ Đang làm Yama 3: Fear the Reaper (Hop Săn Soul Reaper)..."
+            lblCDKBoss.TextColor3 = Color3.fromRGB(255, 215, 0)
+            lblStatus.Text = string.format("Trạng thái: ⚔️ [GIAI ĐOẠN 1: YAMA 3] RealKid đang làm Fear the Reaper (Tự Hop Săn Soul Reaper & Hell)... %s", timeDisplay)
+        end
+    elseif not cdkProg.TushitaDone then
+        Engine.CDKBossStartTime = nil
+        if cdkProg.goodDone == 0 then
+            desiredStage = "Tushita1"
+            desiredHub = "RealKid"
+            desiredConfig = REALKID_CONFIG_TUSHITA
+            lblCDKBoss.Text = "👑 Cursed Skeleton Boss: ⚪ Yama ĐÃ XONG! Đang làm Tushita 1: Dokkan..."
+            lblCDKBoss.TextColor3 = Color3.fromRGB(180, 190, 200)
+            lblStatus.Text = string.format("Trạng thái: ⚔️ [GIAI ĐOẠN 2: TUSHITA 1] Yama ĐÃ XONG! RealKid đang nói chuyện 3 Thuyền Trưởng... %s", timeDisplay)
+        elseif cdkProg.goodDone == 1 then
+            desiredStage = "Tushita2"
+            desiredHub = "DualHub"
+            desiredConfig = REALKID_CONFIG_TUSHITA
+            lblCDKBoss.Text = "👑 Cursed Skeleton Boss: ⚪ Đang làm Tushita 2 (Night Hub + RealKid Auto Tushita)..."
+            lblCDKBoss.TextColor3 = Color3.fromRGB(255, 140, 50)
+            lblStatus.Text = string.format("Trạng thái: 🏰 [GIAI ĐOẠN 2: TUSHITA 2] Chạy ĐỒNG THỜI Night Hub (1 lần) & RealKid chờ Castle Pirate Raid... %s", timeDisplay)
+        else
+            -- =========================================================================
+            -- GIAI ĐOẠN 2: TUSHITA 3 (CAKE QUEEN / HEAVENLY DIMENSION)
+            -- =========================================================================
+            desiredStage = "Tushita3"
+            desiredHub = "RealKid"
+            desiredConfig = REALKID_CONFIG_TUSHITA
+
+            local inHeaven = IsInHeavenlyDimension()
+            local cqModel, cqHum = ScanEntityMobFuzzy("cake queen")
+            local isCakeQueenAlive = (cqModel and cqHum and cqHum.Health > 0)
+
+            if inHeaven then
+                Tushita3Controller.WaitingForHeavenly = false
+                Tushita3Controller.CakeQueenSeen = false
+                lblCDKBoss.Text = "👑 Cursed Skeleton Boss: 🟢 ĐANG Ở HEAVENLY DIMENSION! Đang hoàn thành bệ Tushita..."
+                lblCDKBoss.TextColor3 = Color3.fromRGB(80, 255, 140)
+                lblStatus.Text = "Trạng thái: 🍰 ĐÃ VÀO HEAVENLY DIMENSION! RealKid đang xử lý quái & thắp đuốc nhận mảnh thứ 6..."
+            elseif Tushita3Controller.WaitingForHeavenly then
+                local elapsedWait = os.clock() - Tushita3Controller.WaitStartTime
+                local remainWait = math.max(0, 5 - math.floor(elapsedWait))
+                lblCDKBoss.Text = string.format("👑 Cursed Skeleton Boss: ⏳ Đã hạ Cake Queen! Chờ dịch chuyển (%ds/5s)...", math.floor(elapsedWait))
+                lblCDKBoss.TextColor3 = Color3.fromRGB(255, 215, 0)
+                lblStatus.Text = string.format("Trạng thái: 🍰 Đã hạ Cake Queen! Đang đếm ngược %d giây để kiểm tra Heavenly Dimension...", remainWait)
+
+                if elapsedWait >= 5 then
+                    if IsInHeavenlyDimension() then
+                        Tushita3Controller.WaitingForHeavenly = false
+                        lblStatus.Text = "Trạng thái: 🟢 Đã xác nhận vào Heavenly Dimension thành công!"
+                    else
+                        Tushita3Controller.WaitingForHeavenly = false
+                        lblStatus.Text = "Trạng thái: ⚠️ Hết 5s sau khi hạ Cake Queen mà KHÔNG vào Heavenly Dimension! Hop Low Server..."
+                        Engine:HopLowServer()
+                    end
+                end
+            else
+                if isCakeQueenAlive then
+                    Tushita3Controller.CakeQueenSeen = true
+                    local hpPct = math.floor((cqHum.Health / cqHum.MaxHealth) * 100)
+                    lblCDKBoss.Text = string.format("👑 Cursed Skeleton Boss: ⚪ Phát hiện Cake Queen (%d%% HP)! RealKid đang áp sát tiêu diệt...", hpPct)
+                    lblCDKBoss.TextColor3 = Color3.fromRGB(255, 180, 210)
+                    lblStatus.Text = string.format("Trạng thái: 🍰 [TUSHITA 3] Phát hiện Cake Queen (%d%% HP)! Đang đánh để kích hoạt Heavenly Dimension... %s", hpPct, timeDisplay)
+                else
+                    if Tushita3Controller.CakeQueenSeen then
+                        Tushita3Controller.CakeQueenSeen = false
+                        Tushita3Controller.WaitingForHeavenly = true
+                        Tushita3Controller.WaitStartTime = os.clock()
+                        lblStatus.Text = "Trạng thái: 🍰 Cake Queen đã bị tiêu diệt! Bắt đầu chờ 5s để dịch chuyển vào Heavenly Dimension..."
+                    else
+                        lblCDKBoss.Text = "👑 Cursed Skeleton Boss: 🔴 Server không có Cake Queen! Đang Hop Low Server..."
+                        lblCDKBoss.TextColor3 = Color3.fromRGB(255, 100, 100)
+                        lblStatus.Text = "Trạng thái: 🍰 [TUSHITA 3] Quét 1 lần: Server KHÔNG CÓ Cake Queen & KHÔNG ở Heavenly Dimension -> Hop Low Server tìm boss!"
+                        Engine:HopLowServer()
+                    end
+                end
+            end
+        end
+    else
+        -- =========================================================================
+        -- GIAI ĐOẠN 3: ĐÃ XONG CẢ 6 TRIAL -> ĐỐT 2 BỆ & DIỆT BOSS CDK
+        -- =========================================================================
+        desiredStage = "CDKBoss"
+        desiredHub = "RealKid"
+        desiredConfig = REALKID_CONFIG_BOSS
+
+        Tushita3Controller.WaitingForHeavenly = false
+        Tushita3Controller.CakeQueenSeen = false
+
+        if not Engine.CDKBossStartTime then
+            Engine.CDKBossStartTime = os.clock()
+        end
+
+        local elapsedBossWait = os.clock() - Engine.CDKBossStartTime
+        local remainBossHop = math.max(0, 240 - math.floor(elapsedBossWait))
+        local mRemain = math.floor(remainBossHop / 60)
+        local sRemain = math.floor(remainBossHop % 60)
+
+        if cdkProg.ReadyBoss then
+            lblCDKBoss.Text = string.format("👑 Cursed Skeleton Boss: 🟢 ĐÃ ĐỐT 2 BỆ! Diệt Boss CDK (Hop sau: %02d:%02d)", mRemain, sRemain)
+            lblCDKBoss.TextColor3 = Color3.fromRGB(80, 255, 140)
+            lblStatus.Text = string.format("Trạng thái: 👑 ĐÃ XONG 6 TRIAL & ĐỐT 2 BỆ! RealKid đang triệu hồi diệt Boss CDK [Đã chờ %ds/240s]... %s", math.floor(elapsedBossWait), timeDisplay)
+        else
+            lblCDKBoss.Text = string.format("👑 Cursed Skeleton Boss: 🟡 XONG 6 TRIAL! Đang đốt 2 bệ (Hop sau: %02d:%02d)", mRemain, sRemain)
+            lblCDKBoss.TextColor3 = Color3.fromRGB(255, 215, 0)
+            lblStatus.Text = string.format("Trạng thái: ⚔️ ĐÃ XONG 6/6 TRIAL! Đang đốt 2 bệ [Đã chờ %ds/240s]... %s", math.floor(elapsedBossWait), timeDisplay)
+        end
+
+        -- TỰ ĐỘNG HOP LOW SERVER NẾU SAU 4 PHÚT (240S) CHƯA CÓ CDK TRONG TÚI
+        if elapsedBossWait >= 240 and not Engine.IsHopping then
+            local hasCDKNow = Scanner:HasItem("cursed dual katana") or Scanner:HasItem("cdk") or (Scanner:GetSwordMastery("Cursed Dual Katana") > 0)
+            if not hasCDKNow then
+                lblStatus.Text = string.format("Trạng thái: ⏰ ĐÃ QUÁ 4 PHÚT (%02d:%02d) XONG 6 TRIAL MÀ CHƯA CÓ CDK! Đang tự động Hop Low Server...", math.floor(elapsedBossWait / 60), math.floor(elapsedBossWait % 60))
+                Engine:HopLowServer()
+            end
+        end
+    end
+
+    -- =====================================================================
+    -- KÍCH HOẠT CHUYỂN BƯỚC: GHI ĐÈ CONFIG -> ĐỢI 1S -> CHẠY LẠI SCRIPT NGAY
+    -- =====================================================================
+    if Engine.ActiveCDKMode ~= desiredStage then
+        warn(string.format("[AXIOM CDK PIPELINE] BƯỚC THỰC THI THAY ĐỔI: %s -> %s!", tostring(Engine.ActiveCDKMode), desiredStage))
+        Engine.ActiveCDKMode = desiredStage
+
+        if desiredHub == "DualHub" then
+            WriteRealKidConfig(desiredConfig)
+            if not Engine.NightHubRaidFired then
+                Engine.NightHubRaidFired = true
+                Engine.NightHubRunning = true
+                EnsureNightHubKey()
+                WriteNightHubConfig(NIGHTHUB_CONFIG_CASTLE_RAID)
+                warn("[AXIOM CDK] Ghi đè Night Hub Castle Raid! Đợi 1s và chạy...")
+                LaunchNightHub(1.0)
+            end
+            warn(string.format("[AXIOM CDK] Ghi đè RealKid: %s! Đợi 1s và chạy...", desiredStage))
+            LaunchRealKid(1.0)
+        elseif desiredHub == "NightHub" then
+            if Engine.RealkidRunning then Engine.RealkidRunning = false end
+            Engine.NightHubRunning = true
+            getgenv()._NightHubExecuted = true
+            EnsureNightHubKey()
+            WriteNightHubConfig(desiredConfig)
+            warn(string.format("[AXIOM CDK] Ghi đè Night Hub: %s! Đợi 1s và chạy lại...", desiredStage))
+            LaunchNightHub(1.0)
+        else
+            -- RealKid Đơn lẻ (Yama 1, 2, 3, Tushita 1, 3, CDKBoss)
+            if Engine.NightHubRunning then
+                Engine.NightHubRunning = false
+                Engine.CurrentNightHubMode = nil
+                getgenv()._NightHubExecuted = nil
+            end
+            Engine.RealkidRunning = true
+            WriteRealKidConfig(desiredConfig)
+            warn(string.format("[AXIOM CDK] Ghi đè file RealKid: %s -> Đợi 1s rồi chạy lại script!", desiredStage))
+            LaunchRealKid(1.0)
+        end
+    end
+end
+
+-- DAEMON ĐẾM NGƯỢC 5S & TỰ ĐỘNG REFRESH TIẾN TRÌNH CDK
+local cdkCountdownDaemon = task.spawn(function()
+    while Engine.IsRunning do
+        if Engine.InCDKMode then
+            local now = os.clock()
+
+            if SharedCDK.IsFetching and (now - SharedCDK.FetchStartedAt > 3.0) then
+                SharedCDK.IsFetching = false
+                SharedCDK.NextRefreshTime = now + 5.0
+            end
+
+            local remaining = math.max(0, SharedCDK.NextRefreshTime - now)
+
+            if (remaining <= 0 or not SharedCDK.Data) and not SharedCDK.IsFetching then
+                SharedCDK.IsFetching = true
+                SharedCDK.FetchStartedAt = now
+                SharedCDK.NextRefreshTime = now + 5.0
+
+                task.spawn(function()
+                    local ok, res = pcall(function()
+                        return Scanner:GetCDKQuestStatus()
+                    end)
+                    if ok and res then
+                        SharedCDK.Data = res
+                        local elapsed = os.clock() - Engine.ServerJoinTime
+                        local tDisp = string.format("[%02d:%02d/20:00]", math.floor(elapsed / 60), math.floor(elapsed % 60))
+                        pcall(ProcessCDKPipeline, res, tDisp)
+                    end
+                    SharedCDK.IsFetching = false
+                end)
+            end
+
+            local completed = (SharedCDK.Data and SharedCDK.Data.TotalCompleted) or 0
+            local frags = (SharedCDK.Data and SharedCDK.Data.AlucardFragments) or 0
+            lblCDKHeader.Text = string.format("⚔️ TIẾN TRÌNH CDK: [%d/6 XONG] | ALUCARD: [%d/6] (Làm mới sau: %.1fs)", completed, frags, remaining)
+        end
+        task.wait(0.1)
+    end
+end)
+table.insert(Engine.Threads, cdkCountdownDaemon)
+
+-- RADAR MASTER THREAD
+local radarThread = task.spawn(function()
+    while Engine.IsRunning do
+        local serverElapsed = os.clock() - Engine.ServerJoinTime
+        local timeDisplay = string.format("[%02d:%02d/20:00]", math.floor(serverElapsed / 60), math.floor(serverElapsed % 60))
+
+        local hasTushita = false
+        local tushitaMastery = 0
+        pcall(function()
+            hasTushita = Scanner:HasItem("tushita")
+            if hasTushita then tushitaMastery = Scanner:GetSwordMastery("Tushita") end
+        end)
+
+        local hasYama = false
+        local yamaMastery = 0
+        pcall(function()
+            hasYama = Scanner:HasItem("yama")
+            if hasYama then yamaMastery = Scanner:GetSwordMastery("Yama") end
+        end)
+
+        local hasValkyrie = false
+        pcall(function() hasValkyrie = Scanner:HasItem("valkyrie") end)
+
+        local hasFractal, fractalCount = false, 0
+        pcall(function() hasFractal, fractalCount = Scanner:HasMirrorFractal() end)
+
+        local hasCDK = false
+        pcall(function() hasCDK = Scanner:HasItem("cursed dual katana") or Scanner:HasItem("cdk") end)
+
+        if not Engine.InCDKMode then
+            if hasTushita then
+                lblTushitaItem.Text = string.format("Kiếm Tushita: 🟢 ĐÃ CÓ [Mastery: %d/350]", tushitaMastery)
+                lblTushitaItem.TextColor3 = (tushitaMastery >= 350) and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 215, 80)
+            else
+                lblTushitaItem.Text = "Kiếm Tushita: 🔴 CHƯA CÓ"
+                lblTushitaItem.TextColor3 = Color3.fromRGB(255, 100, 100)
+            end
+
+            if hasYama then
+                lblYamaItem.Text = string.format("Kiếm Yama: 🟢 ĐÃ CÓ [Mastery: %d/350]", yamaMastery)
+                lblYamaItem.TextColor3 = (yamaMastery >= 350) and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 215, 80)
+            else
+                lblYamaItem.Text = "Kiếm Yama: 🔴 CHƯA CÓ"
+                lblYamaItem.TextColor3 = Color3.fromRGB(255, 100, 100)
+            end
+
+            if hasValkyrie then
+                lblValkyrieItem.Text = "Valkyrie Helm: 🟢 ĐÃ CÓ"
+                lblValkyrieItem.TextColor3 = Color3.fromRGB(80, 255, 120)
+            else
+                lblValkyrieItem.Text = "Valkyrie Helm: 🔴 CHƯA CÓ"
+                lblValkyrieItem.TextColor3 = Color3.fromRGB(255, 100, 100)
+            end
+
+            if hasFractal then
+                lblFractalItem.Text = string.format("Mirror Fractal: 🟢 ĐÃ CÓ (x%d)", fractalCount)
+                lblFractalItem.TextColor3 = Color3.fromRGB(80, 255, 120)
+            else
+                lblFractalItem.Text = "Mirror Fractal: 🔴 CHƯA CÓ"
+                lblFractalItem.TextColor3 = Color3.fromRGB(255, 100, 100)
+            end
+
+            pcall(function()
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                local commF = remotes and remotes:FindFirstChild("CommF_")
+                if commF then
+                    local prog = commF:InvokeServer("TushitaProgress")
+                    if typeof(prog) == "table" then Engine.CachedTushitaProgress = prog end
+                end
+            end)
+
+            local isGateOpened = (Engine.CachedTushitaProgress and Engine.CachedTushitaProgress.OpenedDoor == true)
+            if isGateOpened then
+                lblGate.Text = "Cổng Tushita: 🟢 ĐÃ MỞ (OpenedDoor = true)"
+                lblGate.TextColor3 = Color3.fromRGB(80, 255, 120)
+            else
+                lblGate.Text = "Cổng Tushita: 🔴 CHƯA MỞ (Cần cắm 5 đuốc)"
+                lblGate.TextColor3 = Color3.fromRGB(255, 100, 100)
+            end
+
+            local enemies = workspace:FindFirstChild("Enemies")
+            local indra = nil
+            if enemies then indra = enemies:FindFirstChild("rip_indra True Form") or enemies:FindFirstChild("rip_indra") end
+            if not indra then indra = ReplicatedStorage:FindFirstChild("rip_indra True Form") or ReplicatedStorage:FindFirstChild("rip_indra") end
+
+            if indra and indra:FindFirstChild("Humanoid") and indra.Humanoid.Health > 0 then
+                local hp = math.floor(indra.Humanoid.Health / indra.Humanoid.MaxHealth * 100)
+                lblIndra.Text = string.format("rip_indra: 🔴 ĐANG XUẤT HIỆN! [Máu: %d%%]", hp)
+                lblIndra.TextColor3 = Color3.fromRGB(255, 60, 60)
+            else
+                lblIndra.Text = "rip_indra: ⚪ Không có trong server"
+                lblIndra.TextColor3 = Color3.fromRGB(160, 170, 180)
+            end
+
+            local doughMob = GetDoughKingMob()
+            if doughMob and doughMob:FindFirstChild("Humanoid") and doughMob.Humanoid.Health > 0 then
+                local hp = math.floor(doughMob.Humanoid.Health / doughMob.Humanoid.MaxHealth * 100)
+                lblDough.Text = string.format("Dough King: 🔴 ĐANG XUẤT HIỆN! [Máu: %d%%]", hp)
+                lblDough.TextColor3 = Color3.fromRGB(255, 120, 200)
+            else
+                lblDough.Text = "Dough King: ⚪ Không có trong server"
+                lblDough.TextColor3 = Color3.fromRGB(160, 170, 180)
+            end
+
+            local bp = LocalPlayer:FindFirstChild("Backpack")
+            local char = LocalPlayer.Character
+            local hasTorchInBag = (bp and bp:FindFirstChild("Holy Torch")) or (char and char:FindFirstChild("Holy Torch"))
+
+            if hasTorchInBag and not Engine.TorchesFired then
+                AutoFire5Torches()
+            elseif not hasTorchInBag then
+                Engine.TorchesFired = false
+            end
+
+            if hasTorchInBag then
+                lblTorch.Text = "Holy Torch: 🟡 ĐÃ CÓ TRONG TÚI! (Đang tự nã 5 đuốc)"
+                lblTorch.TextColor3 = Color3.fromRGB(255, 210, 50)
+            elseif isGateOpened then
+                lblTorch.Text = "Holy Torch: 🟢 CỔNG ĐÃ MỞ (Đang chờ chém Longma)"
+                lblTorch.TextColor3 = Color3.fromRGB(80, 255, 120)
+            elseif indra then
+                lblTorch.Text = "Holy Torch: 🔴 ĐANG CẦN! (Indra có mặt)"
+                lblTorch.TextColor3 = Color3.fromRGB(255, 90, 90)
+            else
+                lblTorch.Text = "Holy Torch: ⚪ Không cần / Không có Indra"
+                lblTorch.TextColor3 = Color3.fromRGB(160, 170, 180)
+            end
+        end
+
+        -- =========================================================================
+        -- PHÂN LUỒNG MỤC TIÊU & CHUYỂN TIẾP TỨC THÌ (TUSHITA -> VALKYRIE HELM)
+        -- =========================================================================
+        if not Engine.IsHopping then
+            if not hasTushita then
+                if Engine.CurrentObjective ~= "Tushita" or not Engine.NightHubRunning then
+                    Engine.CurrentObjective = "Tushita"
+                    DispatchNightHubInstant("Tushita")
+                end
+            elseif hasTushita and not hasValkyrie then
+                if Engine.CurrentObjective ~= "Valkyrie" or Engine.CurrentNightHubMode ~= "Valkyrie" then
+                    Engine.CurrentObjective = "Valkyrie"
+                    lblStatus.Text = "Trạng thái: 🟢 ĐÃ CÓ KIẾM TUSHITA! Ghi đè config Valkyrie Helm -> Chạy lại Night Hub!"
+                    DispatchNightHubInstant("Valkyrie", true)
+                end
+            elseif hasTushita and hasValkyrie and not hasFractal then
+                Engine.CurrentObjective = "DoughKing"
+                local myChar = LocalPlayer.Character
+                local hrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                local hum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+
+                if hrp and hum and hum.Health > 0 then
+                    local distToCakeLoaf = (hrp.Position - POS_CAKE_LOAF).Magnitude
+                    local isNearCakeLoaf = (distToCakeLoaf <= NEAR_CAKE_LOAF_RADIUS)
+
+                    local doughMob = GetDoughKingMob()
+                    if isNearCakeLoaf and doughMob and doughMob:FindFirstChild("HumanoidRootPart") and doughMob:FindFirstChild("Humanoid") and doughMob.Humanoid.Health > 0 then
+                        if not Engine.AtMirrorPoint then
+                            lblStatus.Text = string.format("Trạng thái: 🚀 Ở gần Cake Loaf & có Dough King! Bay đến điểm gương (%d studs)... %s", math.floor((hrp.Position - POS_MIRROR).Magnitude), timeDisplay)
+                            local ok = TweenToPosition(POS_MIRROR, 220)
+                            if ok then
+                                Engine.AtMirrorPoint = true
+                                task.wait(0.3)
+                            end
+                        else
+                            local distToBoss = (hrp.Position - doughMob.HumanoidRootPart.Position).Magnitude
+                            if distToBoss > 70 then
+                                lblStatus.Text = "Trạng thái: ⚔️ Bay từ điểm gương vào áp sát Dough King... " .. timeDisplay
+                                TweenToPosition(doughMob.HumanoidRootPart.Position + Vector3.new(0, 14, 0), 220)
+                            else
+                                local hp = math.floor(doughMob.Humanoid.Health / doughMob.Humanoid.MaxHealth * 100)
+                                lblStatus.Text = string.format("Trạng thái: ⚔️ ĐANG DIỆT DOUGH KING! [Máu: %d%%] %s", hp, timeDisplay)
+                                KillDoughKingTarget(doughMob)
+                            end
+                        end
+                    else
+                        Engine.AtMirrorPoint = false
+                        if Engine.CurrentNightHubMode ~= "DoughKing" then
+                            if not isNearCakeLoaf then
+                                lblStatus.Text = string.format("Trạng thái: 🚀 Không ở gần Cake Loaf (%d studs) -> Bật thẳng Night Hub Dough King! %s", math.floor(distToCakeLoaf), timeDisplay)
+                            else
+                                lblStatus.Text = "Trạng thái: ⚪ Ở Cake Loaf nhưng server không có Dough King -> Bật Night Hub Hop Boss! " .. timeDisplay
+                            end
+                            DispatchNightHubInstant("DoughKing")
+                        end
+                    end
+                end
+            elseif hasTushita and hasValkyrie and hasFractal and not hasYama then
+                Engine.CurrentObjective = "Yama"
+                if Engine.CurrentNightHubMode ~= "Yama" then
+                    lblStatus.Text = "Trạng thái: ⚔️ Đã có Mirror Fractal! Đang thiếu kiếm Yama -> Bật Night Hub Auto Yama... " .. timeDisplay
+                    DispatchNightHubInstant("Yama")
+                end
+            elseif yamaMastery < 350 or tushitaMastery < 350 then
+                if Engine.NightHubRunning then
+                    Engine.NightHubRunning = false
+                    Engine.CurrentNightHubMode = nil
+                    getgenv()._NightHubExecuted = nil
+                end
+                Engine.CurrentObjective = "MasteryFarm"
+
+                if yamaMastery < 350 then
+                    lblStatus.Text = string.format("Trạng thái: ⚔️ Đang cày Bone Haunted Castle (Gom 2-3 quái) cho YAMA [%d/350]... %s", yamaMastery, timeDisplay)
+                    ExecuteBoneFarmForSword("Yama", yamaMastery)
+                elseif tushitaMastery < 350 then
+                    lblStatus.Text = string.format("Trạng thái: ⚔️ Yama đã đủ 350! Đang cày Bone (Gom 2-3 quái) cho TUSHITA [%d/350]... %s", tushitaMastery, timeDisplay)
+                    ExecuteBoneFarmForSword("Tushita", tushitaMastery)
+                end
+            else
+                -- GIAI ĐOẠN 3: TỰ ĐỘNG LÀM CURSED DUAL KATANA (CDK)
+                SwitchUIToCDKMode()
+                Engine.CurrentObjective = "AutoCDK"
+
+                if Engine.NightHubRunning and Engine.ActiveCDKMode ~= "Tushita2" then
+                    Engine.NightHubRunning = false
+                    Engine.CurrentNightHubMode = nil
+                    getgenv()._NightHubExecuted = nil
+                end
+
+                if hasCDK then
+                    Engine.CDKBossStartTime = nil
+                    lblCDKBoss.Text = "👑 Cursed Skeleton Boss: 🟢 ĐÃ HOÀN THÀNH LẤY CDK!"
+                    lblCDKBoss.TextColor3 = Color3.fromRGB(80, 255, 140)
+                    lblStatus.Text = "Trạng thái: 👑 HOÀN TẤT TẤT CẢ! BẠN ĐÃ SỞ HỮU CURSED DUAL KATANA (CDK) TRONG KHO ĐỒ! " .. timeDisplay
+                    lblStatus.TextColor3 = Color3.fromRGB(80, 255, 140)
+                else
+                    local cdkProg = SharedCDK.Data or Scanner:GetCDKQuestStatus()
+                    ProcessCDKPipeline(cdkProg, timeDisplay)
+                end
+            end
+        end
+
+        task.wait(0.3)
+    end
+end)
+table.insert(Engine.Threads, radarThread)

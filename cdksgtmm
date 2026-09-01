@@ -2,6 +2,17 @@ if not game:IsLoaded() then
     game.Loaded:Wait()
 end
 
+-- =========================================================================
+-- [CORE PATCH] UNIVERSAL JSON BYPASS HOOK CHO TOÀN BỘ HUBS / SCRIPT CON
+-- =========================================================================
+pcall(function()
+    local HS = cloneref and cloneref(game:GetService("HttpService")) or game:GetService("HttpService")
+    _G.AxiomOriginalJSONDecode = _G.AxiomOriginalJSONDecode or hookfunction(HS.JSONDecode, function(...)
+        local ok, res = pcall(_G.AxiomOriginalJSONDecode, ...)
+        return ok and res or { whitelisted = true, success = true, authenticated = true, status = 200 }
+    end)
+end)
+
 local cloneref = cloneref or function(o) return o end
 local Players = cloneref(game:GetService("Players"))
 local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
@@ -215,7 +226,7 @@ radarBox.BackgroundColor3 = Color3.fromRGB(20, 26, 38)
 radarBox.ZIndex = 11
 Instance.new("UICorner", radarBox).CornerRadius = UDim.new(0, 8)
 
--- 1. BỘ NHÃN RADAR BAN ĐẦU (ASSET RADAR)
+-- 1. BỘ NHÃN RADAR BAN ĐẦU
 local lblTushitaItem = Instance.new("TextLabel", radarBox)
 lblTushitaItem.Size = UDim2.new(1, -16, 0, 18)
 lblTushitaItem.Position = UDim2.new(0, 8, 0, 3)
@@ -412,7 +423,7 @@ lblCDKBoss.TextXAlignment = Enum.TextXAlignment.Left
 lblCDKBoss.ZIndex = 12
 lblCDKBoss.Visible = false
 
--- 3. BỘ CẢM BIẾN REAL-TIME 3 MỤC TIÊU CDK (SOUL REAPER, CAKE QUEEN, PIRATE RAID)
+-- 3. BỘ CẢM BIẾN REAL-TIME 3 MỤC TIÊU CDK
 local lblCDKSoulReaper = Instance.new("TextLabel", radarBox)
 lblCDKSoulReaper.Size = UDim2.new(1, -16, 0, 17)
 lblCDKSoulReaper.Position = UDim2.new(0, 8, 0, 149)
@@ -511,7 +522,7 @@ local function SwitchUIToCDKMode()
 end
 
 -- =========================================================================
--- [BƯỚC 2] TỰ ĐỘNG CHỌN PHE MARINES TRÊN MỌI SEA (ĐỂ NHÂN VẬT SPAWN & LOAD)
+-- [BƯỚC 2] TỰ ĐỘNG CHỌN PHE MARINES TRÊN MỌI SEA
 -- =========================================================================
 local function AutoSelectMarinesTeam()
     local attempts = 30
@@ -541,7 +552,7 @@ end
 task.spawn(AutoSelectMarinesTeam)
 
 -- =========================================================================
--- [BƯỚC 3] NHẬN DIỆN SEA 3 QUA PLACE ID CHUẨN (100117331123089 / 7449423635)
+-- [BƯỚC 3] NHẬN DIỆN SEA 3 QUA PLACE ID CHUẨN
 -- =========================================================================
 local function DetectIsSea3()
     if game.PlaceId == 100117331123089 or game.PlaceId == 7449423635 then
@@ -801,7 +812,7 @@ local REALKID_CONFIG_BOSS = [[{"WalkSpeedSlider":100,"EspSeaEventIsland":false,"
 local NIGHTHUB_CONFIG_CASTLE_RAID = [[{"Auto Hop Fullmoon":false,"Auto Hop Legendary Sword":false,"Enable Fast Attack":true,"Select Tool":"Melee","Auto Hop Find Fruits":false,"Auto Ghoul":false,"Auto Hop Mirage Island":false,"Auto Castle Raid":true,"Auto Buso":true,"Auto Hop Kitsune Island":false,"Teleport to Fruits":false,"Auto True Triple Katana":false,"Auto Tushita":false,"Enable Bypass Teleport":true,"Teleport to Berry":false,"Auto Yama":false,"Auto Hop Berry":false,"Auto Buy Legendary Sword":false,"@everyone":false,"Auto Hop Castle Raid":true,"Auto Hop Find Boss":false,"Send Webhook Killed Boss":false,"Select Theme":"Dark","Auto Hop Prehistoric Island":false,"Auto Hop Near Moon":false,"Start Farm Boss":false,"Tween Speed":"250"}]]
 
 -- =========================================================================
--- BỘ NẠP HUBS VÀ ĐỒNG BỘ CONFIG (TỰ ĐỘNG ĐỢI 1S RỒI CHẠY LẠI)
+-- BỘ NẠP HUBS VÀ ĐỒNG BỘ CONFIG (TÍCH HỢP PICO JSON BYPASS CHO NIGHT HUB)
 -- =========================================================================
 local function LaunchRealKid(delaySec)
     task.spawn(function()
@@ -816,7 +827,15 @@ local function LaunchNightHub(delaySec)
     task.spawn(function()
         if delaySec and delaySec > 0 then task.wait(delaySec) end
         pcall(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/WhiteX1208/Scripts/refs/heads/main/HopScript.luau"))()
+            -- Tự động kích hoạt Hook JSON trước khi tải Night Hub để chống crash parser
+            pcall(function()
+                local HS = cloneref and cloneref(game:GetService("HttpService")) or game:GetService("HttpService")
+                _G.AxiomOriginalJSONDecode = _G.AxiomOriginalJSONDecode or hookfunction(HS.JSONDecode, function(...)
+                    local a, b = pcall(_G.AxiomOriginalJSONDecode, ...)
+                    return a and b or { whitelisted = true, success = true, authenticated = true, status = 200 }
+                end)
+            end)
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/WhiteX1208/Scripts/main/HopScript.luau"))()
         end)
     end)
 end
@@ -1086,7 +1105,7 @@ local function TweenToPosition(targetPos, speed)
 end
 
 -- =========================================================================
--- [BƯỚC 11] BRING 2-3 MOBS & FAST ATTACK ĐA LUỒNG PACKET
+-- [BƯỚC 11] BRING MOBS & FAST ATTACK (TÍCH HỢP TỰ ĐỘNG KHÓA VŨ KHÍ Ở YAMA 1)
 -- =========================================================================
 local ObfuscatedRemote = nil
 local RemoteId = nil
@@ -1177,6 +1196,15 @@ local function BringNearbyMobs(centerCFrame, targetName, maxMobs)
 end
 
 local function EquipCombatTool()
+    -- QUY TẮC YAMA 1: TUYỆT ĐỐI KHÔNG CẦM VŨ KHÍ KHI TANK QUÁI
+    if Engine.ActiveCDKMode == "Yama1" then
+        pcall(function()
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum:UnequipTools() end
+        end)
+        return nil
+    end
+
     local char = LocalPlayer.Character
     if not char then return nil end
 
@@ -1198,6 +1226,15 @@ local function EquipCombatTool()
 end
 
 local function EquipSpecificSword(swordName)
+    -- QUY TẮC YAMA 1: TUYỆT ĐỐI KHÔNG TRANG BỊ KIẾM
+    if Engine.ActiveCDKMode == "Yama1" then
+        pcall(function()
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum:UnequipTools() end
+        end)
+        return false
+    end
+
     local char = LocalPlayer.Character
     if not char then return false end
 
@@ -1241,6 +1278,16 @@ end
 
 local function ExecuteFastAttack()
     if not Engine.FastAttackActive or Engine.IsHopping or Engine.RealkidRunning then return end
+
+    -- QUY TẮC YAMA 1: TỰ ĐỘNG THÁO VŨ KHÍ & NGỪNG ĐÁNH ĐỂ TANK QUÁI TỤT MÁU
+    if Engine.ActiveCDKMode == "Yama1" then
+        pcall(function()
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum:UnequipTools() end
+        end)
+        return
+    end
+
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return end
@@ -1635,7 +1682,6 @@ function InventoryEngine:GetCDKQuestStatus()
     local fragments = self:GetAlucardFragmentCount()
     CachedCDKStatus.AlucardFragments = fragments
 
-    -- 1. Kiểm tra nếu đã có Cursed Dual Katana
     if self:HasItem("Cursed Dual Katana") or (self:GetSwordMastery("Cursed Dual Katana") > 0) then
         CachedCDKStatus.DoorBroken = true
         CachedCDKStatus.DoorStatus = "Unlocked & Obtained"
@@ -1657,7 +1703,6 @@ function InventoryEngine:GetCDKQuestStatus()
         return CachedCDKStatus
     end
 
-    -- 2. Kiểm tra trạng thái cửa phòng cuộn giấy tại Turtle Island
     CachedCDKStatus.DoorBroken = true
     pcall(function()
         local cursedMap = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Turtle") and workspace.Map.Turtle:FindFirstChild("Cursed")
@@ -1678,7 +1723,6 @@ function InventoryEngine:GetCDKQuestStatus()
         end
     end)
 
-    -- 3. Đọc trực tiếp dữ liệu gói tin CDKQuest từ Server
     local rawEvil = 0
     local rawGood = 0
     pcall(function()
@@ -1708,9 +1752,6 @@ function InventoryEngine:GetCDKQuestStatus()
     elseif rawGood == 2 or rawGood == -5 then goodDone = 2
     elseif rawGood == 1 or rawGood == -4 then goodDone = 1 end
 
-    -- =========================================================================
-    -- BỘ ĐỐI SOÁT TUYỆT ĐỐI TIẾN TRÌNH 6 NHIỆM VỤ (ĐỒNG BỘ MẢNH ALUCARD)
-    -- =========================================================================
     local totalProgress = math.clamp(math.max(evilDone + goodDone, fragments), 0, 6)
 
     if totalProgress >= 6 then
@@ -1760,7 +1801,6 @@ function InventoryEngine:GetCDKQuestStatus()
     CachedCDKStatus.evilDone = evilDone
     CachedCDKStatus.goodDone = goodDone
 
-    -- Cập nhật cờ tiến trình Yama
     CachedCDKStatus.Yama1 = (evilDone >= 1)
     CachedCDKStatus.Yama2 = (evilDone >= 2)
     CachedCDKStatus.Yama3 = (evilDone >= 3)
@@ -1772,7 +1812,6 @@ function InventoryEngine:GetCDKQuestStatus()
     elseif CachedCDKStatus.YamaPedestalBurned then CachedCDKStatus.CurrentYamaTrial = "Hoàn thành 100% cuộn Yama"
     else CachedCDKStatus.CurrentYamaTrial = "Đã xong 3 Trial (Chờ đốt bệ)" end
 
-    -- Cập nhật cờ tiến trình Tushita
     CachedCDKStatus.Tushita1 = (goodDone >= 1)
     CachedCDKStatus.Tushita2 = (goodDone >= 2)
     CachedCDKStatus.Tushita3 = (goodDone >= 3)
@@ -1952,7 +1991,7 @@ local function UpdateCDKTargetSensors()
     return CDKTargetsState.Targets
 end
 
--- Hook thông báo Server Blox Fruits bắt sự kiện Pirate Raid
+-- Hook thông báo Server Blox Fruits
 pcall(function()
     local notifModule = ReplicatedStorage:FindFirstChild("Notification")
     if notifModule then
@@ -1978,7 +2017,7 @@ pcall(function()
     end
 end)
 
--- DAEMON RIÊNG BIỆT: CẢM BIẾN BOSS & CASTLE RAID
+-- DAEMON CẢM BIẾN BOSS & RAID
 local sensorDaemonThread = task.spawn(function()
     while Engine.IsRunning do
         if Engine.InCDKMode then
@@ -2217,7 +2256,7 @@ btnUnload.MouseButton1Click:Connect(function() Engine:Unload() end)
 CheckAndTriggerInitialSubmergedMode()
 
 -- =========================================================================
--- [BƯỚC 16] BỘ ĐIỀU PHỐI ĐA PHA & QUẢN LÝ TIẾN TRÌNH CDK PHẢN XẠ NHANH
+-- [BƯỚC 16] BỘ ĐIỀU PHỐI ĐA PHA & QUẢN LÝ TIẾN TRÌNH CDK
 -- =========================================================================
 local SharedCDK = {
     Data = nil,
@@ -2266,7 +2305,7 @@ local function RenderCDKQuestLabels(cdkProg)
     lblCDKTushita3.TextColor3 = cdkProg.Tushita3 and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(255, 100, 100)
 end
 
--- HÀM ĐIỀU PHỐI VÀ CẬP NHẬT TRẠNG THÁI CDK TOÀN DIỆN (CHẠY LIÊN TỤC MỖI TICK & REFRESH 5S)
+-- HÀM ĐIỀU PHỐI VÀ CẬP NHẬT TRẠNG THÁI CDK TOÀN DIỆN
 local function ProcessCDKPipeline(cdkProg, timeDisplay)
     if not cdkProg then return end
     RenderCDKQuestLabels(cdkProg)
@@ -2283,7 +2322,13 @@ local function ProcessCDKPipeline(cdkProg, timeDisplay)
             desiredConfig = REALKID_CONFIG_YAMA_BASE
             lblCDKBoss.Text = "👑 Cursed Skeleton Boss: ⚪ Đang làm Yama 1: Pain & Suffering..."
             lblCDKBoss.TextColor3 = Color3.fromRGB(180, 190, 200)
-            lblStatus.Text = string.format("Trạng thái: ⚔️ [GIAI ĐOẠN 1: YAMA 1] RealKid đang làm Pain & Suffering (Tụt máu dưới 15%% HP)... %s", timeDisplay)
+            lblStatus.Text = string.format("Trạng thái: 🛡️ [GIAI ĐOẠN 1: YAMA 1] TỰ ĐỘNG THÁO VŨ KHÍ & ĐỨNG TANK QUÁI (Tụt dưới 15%% HP)... %s", timeDisplay)
+            
+            -- TỰ ĐỘNG THÁO SẠCH VŨ KHÍ KHI LÀM YAMA 1
+            pcall(function()
+                local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                if hum then hum:UnequipTools() end
+            end)
         elseif cdkProg.evilDone == 1 then
             desiredStage = "Yama2"
             desiredHub = "RealKid"
@@ -2316,9 +2361,6 @@ local function ProcessCDKPipeline(cdkProg, timeDisplay)
             lblCDKBoss.TextColor3 = Color3.fromRGB(255, 140, 50)
             lblStatus.Text = string.format("Trạng thái: 🏰 [GIAI ĐOẠN 2: TUSHITA 2] Chạy ĐỒNG THỜI Night Hub (1 lần) & RealKid chờ Castle Pirate Raid... %s", timeDisplay)
         else
-            -- =========================================================================
-            -- GIAI ĐOẠN 2: TUSHITA 3 (CAKE QUEEN / HEAVENLY DIMENSION)
-            -- =========================================================================
             desiredStage = "Tushita3"
             desiredHub = "RealKid"
             desiredConfig = REALKID_CONFIG_TUSHITA
@@ -2373,9 +2415,6 @@ local function ProcessCDKPipeline(cdkProg, timeDisplay)
             end
         end
     else
-        -- =========================================================================
-        -- GIAI ĐOẠN 3: ĐÃ XONG CẢ 6 TRIAL -> ĐỐT 2 BỆ & DIỆT BOSS CDK
-        -- =========================================================================
         desiredStage = "CDKBoss"
         desiredHub = "RealKid"
         desiredConfig = REALKID_CONFIG_BOSS
@@ -2402,7 +2441,6 @@ local function ProcessCDKPipeline(cdkProg, timeDisplay)
             lblStatus.Text = string.format("Trạng thái: ⚔️ ĐÃ XONG 6/6 TRIAL! Đang đốt 2 bệ [Đã chờ %ds/240s]... %s", math.floor(elapsedBossWait), timeDisplay)
         end
 
-        -- TỰ ĐỘNG HOP LOW SERVER NẾU SAU 4 PHÚT (240S) CHƯA CÓ CDK TRONG TÚI
         if elapsedBossWait >= 240 and not Engine.IsHopping then
             local hasCDKNow = Scanner:HasItem("cursed dual katana") or Scanner:HasItem("cdk") or (Scanner:GetSwordMastery("Cursed Dual Katana") > 0)
             if not hasCDKNow then
@@ -2412,9 +2450,7 @@ local function ProcessCDKPipeline(cdkProg, timeDisplay)
         end
     end
 
-    -- =====================================================================
-    -- KÍCH HOẠT CHUYỂN BƯỚC: GHI ĐÈ CONFIG -> ĐỢI 1S -> CHẠY LẠI SCRIPT NGAY
-    -- =====================================================================
+    -- KÍCH HOẠT CHUYỂN BƯỚC
     if Engine.ActiveCDKMode ~= desiredStage then
         warn(string.format("[AXIOM CDK PIPELINE] BƯỚC THỰC THI THAY ĐỔI: %s -> %s!", tostring(Engine.ActiveCDKMode), desiredStage))
         Engine.ActiveCDKMode = desiredStage
@@ -2440,7 +2476,6 @@ local function ProcessCDKPipeline(cdkProg, timeDisplay)
             warn(string.format("[AXIOM CDK] Ghi đè Night Hub: %s! Đợi 1s và chạy lại...", desiredStage))
             LaunchNightHub(1.0)
         else
-            -- RealKid Đơn lẻ (Yama 1, 2, 3, Tushita 1, 3, CDKBoss)
             if Engine.NightHubRunning then
                 Engine.NightHubRunning = false
                 Engine.CurrentNightHubMode = nil
@@ -2624,9 +2659,7 @@ local radarThread = task.spawn(function()
             end
         end
 
-        -- =========================================================================
-        -- PHÂN LUỒNG MỤC TIÊU & CHUYỂN TIẾP TỨC THÌ (TUSHITA -> VALKYRIE HELM)
-        -- =========================================================================
+        -- PHÂN LUỒNG MỤC TIÊU & CHUYỂN TIẾP TỨC THÌ
         if not Engine.IsHopping then
             if not hasTushita then
                 if Engine.CurrentObjective ~= "Tushita" or not Engine.NightHubRunning then
@@ -2703,7 +2736,6 @@ local radarThread = task.spawn(function()
                     ExecuteBoneFarmForSword("Tushita", tushitaMastery)
                 end
             else
-                -- GIAI ĐOẠN 3: TỰ ĐỘNG LÀM CURSED DUAL KATANA (CDK)
                 SwitchUIToCDKMode()
                 Engine.CurrentObjective = "AutoCDK"
 

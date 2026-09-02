@@ -1,0 +1,716 @@
+--!strict
+-- [[ AXIOM UNIFIED CONTROLLER: CYPULL KEY GATE + FAST ATTACK + DUAL HUBS ]] --
+
+-- [[ 0. WORKSPACE KEY FILE AUTHENTICATION GATE ]] --
+local VALID_KEYS = {
+    ["dontobfuscatemyhubpls"] = true,
+    ["stealkeycc"] = true,
+}
+
+local function AuthenticateKeyFile(): boolean
+    local keyFilePath = "cypull_keysave.txt"
+    
+    if not (isfile and isfile(keyFilePath)) then
+        return false
+    end
+
+    local fileContent: string? = nil
+    pcall(function()
+        fileContent = readfile(keyFilePath)
+    end)
+
+    if not fileContent then
+        return false
+    end
+
+    -- Làm sạch khoảng trắng và ký tự xuống dòng
+    local sanitizedKey = fileContent:gsub("^%s*(.-)%s*$", "%1")
+    return VALID_KEYS[sanitizedKey] == true
+end
+
+if not AuthenticateKeyFile() then
+    local lp = game:GetService("Players").LocalPlayer
+    if lp then
+        lp:Kick("Invail key/HWID mismatch")
+    end
+    return
+end
+
+-- [[ TOÀN BỘ HỆ THỐNG CHÍNH TIẾP TỤC SAU KHI QUA CỔNG CHECK KEY ]] --
+repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerName = LocalPlayer.Name
+
+local SEA_2_ID = 79091703265657
+local SEA_3_ID = 100117331123089
+
+-- [[ GLOBAL RUNTIME CONTAINER ]] --
+local Runtime = {
+    IsRunning = true,
+    AttackActive = true, -- BẬT LIÊN TỤC 24/7
+    AttackRadius = 55,
+    AutoBuso = true,
+    Character = LocalPlayer.Character,
+    Connections = {} :: {RBXScriptConnection},
+    Threads = {} :: {thread},
+    ObfuscatedRemote = nil :: RemoteEvent?,
+    RemoteId = nil :: number?,
+    RealKidExecuted = false,
+    NightHubExecuted = false,
+    CurrentState = "RENDERING UI...",
+}
+
+-- [[ 1. RENDER UI NGAY LẬP TỨC ]] --
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AxiomUnifiedCore"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = (gethui and gethui()) or CoreGui
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 320, 0, 220)
+MainFrame.Position = UDim2.new(0.5, -160, 0.08, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MainFrame.Active = true
+MainFrame.Draggable = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 9)
+local mainStroke = Instance.new("UIStroke", MainFrame)
+mainStroke.Color = Color3.fromRGB(45, 45, 65)
+mainStroke.Thickness = 1.2
+
+local Header = Instance.new("TextLabel", MainFrame)
+Header.Size = UDim2.new(1, -20, 0, 24)
+Header.Position = UDim2.new(0, 10, 0, 8)
+Header.BackgroundTransparency = 1
+Header.Text = "AXIOM // CYPULL CONTROLLER"
+Header.TextColor3 = Color3.fromRGB(0, 190, 255)
+Header.Font = Enum.Font.GothamBold
+Header.TextSize = 13
+Header.TextXAlignment = Enum.TextXAlignment.Left
+
+local InfoBox = Instance.new("TextLabel", MainFrame)
+InfoBox.Size = UDim2.new(1, -20, 0, 130)
+InfoBox.Position = UDim2.new(0, 10, 0, 34)
+InfoBox.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+InfoBox.TextColor3 = Color3.fromRGB(240, 240, 240)
+InfoBox.Font = Enum.Font.Gotham
+InfoBox.TextSize = 11
+InfoBox.TextWrapped = true
+InfoBox.TextXAlignment = Enum.TextXAlignment.Left
+InfoBox.TextYAlignment = Enum.TextYAlignment.Top
+Instance.new("UICorner", InfoBox).CornerRadius = UDim.new(0, 6)
+local padding = Instance.new("UIPadding", InfoBox)
+padding.PaddingLeft = UDim.new(0, 8)
+padding.PaddingTop = UDim.new(0, 6)
+
+local function createButton(text, posX, width, color, callback)
+    local btn = Instance.new("TextButton", MainFrame)
+    btn.Size = UDim2.new(0, width, 0, 32)
+    btn.Position = UDim2.new(0, posX, 0, 174)
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 12
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+createButton("Copy PlaceId", 10, 145, Color3.fromRGB(40, 120, 215), function()
+    local pid = tostring(game.PlaceId)
+    if setclipboard then setclipboard(pid) elseif toclipboard then toclipboard(pid) end
+    Runtime.CurrentState = "PlaceId Copied!"
+end)
+
+local function UnloadEverything()
+    Runtime.IsRunning = false
+    Runtime.AttackActive = false
+
+    for _, conn in ipairs(Runtime.Connections) do
+        if conn and typeof(conn) == "RBXScriptConnection" then
+            pcall(function() conn:Disconnect() end)
+        end
+    end
+    table.clear(Runtime.Connections)
+
+    for _, th in ipairs(Runtime.Threads) do
+        if th and coroutine.status(th) ~= "dead" then
+            pcall(task.cancel, th)
+        end
+    end
+    table.clear(Runtime.Threads)
+
+    if ScreenGui then
+        ScreenGui:Destroy()
+    end
+end
+
+createButton("Unload Script", 165, 145, Color3.fromRGB(215, 45, 45), UnloadEverything)
+
+-- [[ 2. DATA GETTERS ]] --
+local function getFragments(): number
+    local data = LocalPlayer:FindFirstChild("Data")
+    if data and data:FindFirstChild("Fragments") then
+        return tonumber(data.Fragments.Value) or 0
+    end
+    return 0
+end
+
+local function getRace(): string
+    local data = LocalPlayer:FindFirstChild("Data")
+    if data and data:FindFirstChild("Race") then
+        return tostring(data.Race.Value)
+    end
+    return ""
+end
+
+local function isRaceV3(): boolean
+    local containers = {LocalPlayer:FindFirstChild("Backpack"), Runtime.Character}
+    for _, container in ipairs(containers) do
+        if container then
+            if container:FindFirstChild("Energy Core")
+                or container:FindFirstChild("Agility")
+                or container:FindFirstChild("Water Body")
+                or container:FindFirstChild("Heavenly Blood")
+                or container:FindFirstChild("Heightened Senses") then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function getCurrentSea(): number
+    local pid = game.PlaceId
+    if pid == SEA_2_ID or pid == 4442272183 then
+        return 2
+    elseif pid == SEA_3_ID or pid == 7449423635 then
+        return 3
+    end
+    return 1
+end
+
+-- Thread cập nhật UI liên tục
+local uiThread = task.spawn(function()
+    while Runtime.IsRunning and ScreenGui.Parent do
+        local teamName = LocalPlayer.Team and LocalPlayer.Team.Name or "Selecting Marine..."
+        local sea = getCurrentSea()
+        local race = getRace()
+        local frags = getFragments()
+        local v3Text = isRaceV3() and "V3 (Active)" or "Not V3"
+
+        InfoBox.Text = string.format(
+            "Team: %s | Sea: %d\nRace: %s (%s)\nFragments: %d\nFast Attack: 24/7 ACTIVE (Radius %d)\nRealKid: %s | NightHub: %s\nStatus: %s",
+            teamName, sea, race, v3Text, frags,
+            Runtime.AttackRadius,
+            Runtime.RealKidExecuted and "Active" or "Idle",
+            Runtime.NightHubExecuted and "Active" or "Idle",
+            Runtime.CurrentState
+        )
+        task.wait(0.4)
+    end
+end)
+table.insert(Runtime.Threads, uiThread)
+
+-- [[ 3. AUTO SELECT MARINE ]] --
+local function autoSelectMarines()
+    if LocalPlayer.Team and LocalPlayer.Team.Name == "Marines" then
+        return true
+    end
+
+    pcall(function()
+        local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
+        if commF then
+            commF:InvokeServer("SetTeam", "Marines")
+        end
+    end)
+
+    pcall(function()
+        local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not pGui then return end
+        for _, gui in ipairs(pGui:GetChildren()) do
+            if gui:IsA("ScreenGui") then
+                for _, desc in ipairs(gui:GetDescendants()) do
+                    if (desc:IsA("TextButton") or desc:IsA("ImageButton")) and desc.Visible then
+                        local text = (desc:IsA("TextButton") and desc.Text:lower()) or ""
+                        local name = desc.Name:lower()
+                        if name:find("marine") or text:find("marine") then
+                            if firesignal then
+                                firesignal(desc.MouseButton1Click)
+                                firesignal(desc.Activated)
+                            end
+                            pcall(function() desc.MouseButton1Click:Fire() end)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    return (LocalPlayer.Team and LocalPlayer.Team.Name == "Marines")
+end
+
+-- [[ 4. FAST ATTACK SUBSYSTEM ]] --
+local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
+    Runtime.Character = newChar
+end)
+table.insert(Runtime.Connections, charAddedConn)
+
+local function ResolveDynamicRemote()
+    local searchContainers = {
+        ReplicatedStorage:FindFirstChild("Util"),
+        ReplicatedStorage:FindFirstChild("Common"),
+        ReplicatedStorage:FindFirstChild("Remotes"),
+        ReplicatedStorage:FindFirstChild("Assets"),
+        ReplicatedStorage:FindFirstChild("FX"),
+    }
+
+    for _, container in ipairs(searchContainers) do
+        if container then
+            for _, child in ipairs(container:GetChildren()) do
+                if child:IsA("RemoteEvent") and child:GetAttribute("Id") then
+                    Runtime.ObfuscatedRemote = child
+                    Runtime.RemoteId = child:GetAttribute("Id")
+                    return
+                end
+            end
+            local conn = container.ChildAdded:Connect(function(child)
+                if child:IsA("RemoteEvent") and child:GetAttribute("Id") then
+                    Runtime.ObfuscatedRemote = child
+                    Runtime.RemoteId = child:GetAttribute("Id")
+                end
+            end)
+            table.insert(Runtime.Connections, conn)
+        end
+    end
+end
+ResolveDynamicRemote()
+
+local function EquipCombatTool()
+    local char = Runtime.Character or LocalPlayer.Character
+    if not char then return nil end
+
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword") then
+        return equipped
+    end
+
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") and (item.ToolTip == "Melee" or item.ToolTip == "Sword") then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum:EquipTool(item)
+                    return item
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function EnsureBuso()
+    local char = Runtime.Character or LocalPlayer.Character
+    if char and Runtime.AutoBuso and not char:FindFirstChild("HasBuso") then
+        pcall(function()
+            local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
+            if commF then
+                commF:InvokeServer("Buso")
+            end
+        end)
+    end
+end
+
+local function ExecuteFastAttack()
+    if not Runtime.AttackActive then return end
+
+    local char = Runtime.Character or LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if not enemiesFolder then return end
+
+    local hitParts = {}
+    local primaryTargetHead: Instance? = nil
+
+    for _, mob in ipairs(enemiesFolder:GetChildren()) do
+        local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+        local mobHum = mob:FindFirstChildOfClass("Humanoid")
+
+        if mob ~= char and mobRoot and mobHum and mobHum.Health > 0 then
+            local distance = (root.Position - mobRoot.Position).Magnitude
+            if distance <= Runtime.AttackRadius then
+                for _, part in ipairs(mob:GetChildren()) do
+                    if part:IsA("BasePart") then
+                        table.insert(hitParts, { mob, part })
+                    end
+                end
+                if not primaryTargetHead and mob:FindFirstChild("Head") then
+                    primaryTargetHead = mob.Head
+                end
+            end
+        end
+    end
+
+    if #hitParts == 0 then return end
+
+    local activeTool = EquipCombatTool()
+    if not activeTool then return end
+
+    EnsureBuso()
+
+    local netModules = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+    if not netModules then return end
+
+    local regAttack = netModules:FindFirstChild("RE/RegisterAttack")
+    local regHit = netModules:FindFirstChild("RE/RegisterHit")
+
+    if regAttack and regAttack:IsA("RemoteEvent") then
+        regAttack:FireServer()
+    end
+
+    local callHash = tostring(LocalPlayer.UserId):sub(2, 4) .. tostring(coroutine.running()):sub(11, 15)
+
+    if regHit and regHit:IsA("RemoteEvent") and primaryTargetHead then
+        regHit:FireServer(primaryTargetHead, hitParts, {}, callHash)
+    end
+
+    if Runtime.ObfuscatedRemote and Runtime.RemoteId and primaryTargetHead then
+        local obfuscatedKey = string.gsub("RE/RegisterHit", ".", function(c)
+            return string.char(bit32.bxor(string.byte(c), math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1))
+        end)
+
+        local seedVal = 0
+        pcall(function()
+            local seedFunc = netModules:FindFirstChild("seed")
+            if seedFunc and seedFunc:IsA("RemoteFunction") then
+                seedVal = seedFunc:InvokeServer() * 2
+            end
+        end)
+
+        local payloadHash = bit32.bxor(Runtime.RemoteId + 909090, seedVal)
+        pcall(function()
+            Runtime.ObfuscatedRemote:FireServer(obfuscatedKey, payloadHash, primaryTargetHead, hitParts)
+        end)
+    end
+end
+
+local attackThread = task.spawn(function()
+    while Runtime.IsRunning do
+        pcall(ExecuteFastAttack)
+        task.wait(0.08)
+    end
+end)
+table.insert(Runtime.Threads, attackThread)
+
+-- [[ 5. CONFIGS & KEY INJECTOR ]] --
+local BaseRealKidConfig = {
+    ["WalkSpeedSlider"] = 100, ["EspSeaEventIsland"] = false, ["UpgradeDragonTalon"] = false,
+    ["ChangeTransparencyCanSee"] = false, ["LeviathanMultiCannon"] = false, ["GoToSharkmanNPC"] = false,
+    ["ValueDamageMultiSegments"] = 30000, ["AutoStartRaid"] = false, ["AutoTrainV4"] = false,
+    ["SpectatePlayer"] = false, ["auto_ghoul_v1"] = false, ["AutoMelee"] = false,
+    ["AttackMultiSegmentsLeviathan"] = false, ["farm_m1_gun_sea"] = false, ["DungeonAccountStart"] = false,
+    ["EspFlower"] = false, ["global_skill_hold_c"] = 10, ["AutoV3Target_Toggle"] = false,
+    ["selected_fighting_style"] = "Black Leg", ["toggle_bypass_tp"] = false, ["AutoFindKitsuneIsland"] = false,
+    ["AutoCollectGear"] = false, ["RemoveDeathRespawnVFX"] = false, ["auto_farm_ectoplasm"] = false,
+    ["AutoTpAncientClock"] = false, ["farm_height"] = 35, ["EspIslandLocation"] = false,
+    ["AutoEliteQuest"] = false, ["AutoDojoTrainer"] = false, ["AutoDracoFully"] = false,
+    ["BaitSelection"] = "Basic Bait", ["auto_pirate_raid"] = false, ["auto_farm_sea_event"] = false,
+    ["discord_notice_mirage"] = false, ["AutoSlapDodgeAABB"] = false, ["EspChests"] = false,
+    ["ChooseSeaLevel"] = "Lv 1", ["AzureEmberToTrade"] = 1, ["AutoTpAncientOne"] = false,
+    ["Berry"] = false, ["AutoHopChest"] = false, ["AutoLookAtMoon"] = false,
+    ["card_selection"] = {}, ["AutoGun"] = false, ["Bringmob"] = true,
+    ["AcceptRainbowQuest"] = false, ["AutoCollectDragonEggs"] = false, ["AutoYamaCDK"] = false,
+    ["auto_zou_quest"] = false, ["AutoFarmObservationHop"] = false, ["auto_dragon_hunter"] = false,
+    ["SwapDragoRace"] = false, ["global_skill_hold_z"] = 10, ["AutoPhoenixDungeon"] = false,
+    ["Select_Boss_Farm"] = "", ["AutoPickDungeonCards"] = false, ["EspAuraColourDealers"] = false,
+    ["AutoUpgradeRaceV3"] = false, ["RaceV4Aura"] = false, ["auto_cyborg"] = false,
+    ["global_skill_hold_x"] = 10, ["AutoSwanGlasses"] = false, ["AutoResetWhenCompleteVolcano"] = false,
+    ["AutoUnlockedDonSwan"] = false, ["AutoValkyrie"] = false, ["AutoRelicDragoTrial"] = false,
+    ["AntiAFK"] = true, ["AutoMidnightBlade"] = false, ["tocdothuyen"] = "200",
+    ["AutoKeyRengoku"] = false, ["AutoTrainDragoV4"] = false, ["AutoRengokuSword"] = false,
+    ["EspGears"] = false, ["AutoTushitaSword"] = false, ["global_skill_keys"] = {"Z", "X", "C"},
+    ["AutoDriveToHydraIsland"] = false, ["auto_buy_style"] = false, ["AutoFireShootHeartLeviathan"] = false,
+    ["JumpPower"] = false, ["TweenToLegendarySwordDealer"] = false, ["AutoBuyLegendary"] = false,
+    ["EspLegendarySword"] = false, ["AutoBuyV4Gear"] = false, ["auto_raid_law"] = false,
+    ["DungeonAutoJoin"] = false, ["auto_bartilo_quest"] = false, ["AutoEscapeRoughSea"] = false,
+    ["auto_farm_materials"] = false, ["AutoStackDarkbeard"] = false, ["AutoCollectAzureEmber"] = false,
+    ["BringMobMax"] = "6", ["AutoDarkbeard"] = false, ["AutoChooseV4Gear"] = false,
+    ["SafeMode"] = false, ["auto_farm_general"] = false, ["RandomAround"] = false,
+    ["EspAdvancedFruitsDealer"] = false, ["autotwfruits"] = false, ["WalkSpeed"] = false,
+    ["AutoDefense"] = false, ["HopBerry"] = false, ["AutoSerpentBow"] = false,
+    ["TweenToDragoTrials"] = false, ["FarmMastery_G"] = false, ["AutoFindLeviathan"] = false,
+    ["BusuAura"] = true, ["autoshootgun"] = true, ["accept_quests"] = false,
+    ["Chest"] = false, ["auto_citizen_quest"] = false, ["AutoTravel"] = false,
+    ["AutoCanvendishSword"] = false, ["EspPlayers"] = false, ["AutoTweenHighestPoint"] = false,
+    ["TeleportToPlayer"] = false, ["AutoTradeAzureEmber"] = false, ["AutoSwords"] = false,
+    ["ResetAfterTrial"] = false, ["toggle_portal_tp"] = true, ["AutoPrayGravestone"] = false,
+    ["AutoFindPrehistoricIsland"] = false, ["discord_notice_prehistoric"] = false, ["auto_farm_nearest"] = false,
+    ["AutoDragoV2"] = false, ["mastery_health_percent"] = "30%", ["StopWhenChalice"] = true,
+    ["global_skill_hold_v"] = 10, ["BringMode"] = "400", ["auto_farm_tyrant"] = false,
+    ["SelectBoatTarget"] = "My Boat", ["AutoAwakening"] = false, ["auto_factory_raid"] = false,
+    ["global_skill_hold_f"] = 10, ["AutoBuyChipFruit"] = false, ["RemoveHitVFX"] = false,
+    ["AutoGetCDK"] = false, ["TweenSpeedNewZ"] = 280, ["weapon_choice"] = "Melee",
+    ["AutoSkullGuitar"] = false, ["discord_notice_frozen"] = false, ["auto_training_dummy"] = false,
+    ["raidnew"] = false, ["EspFruits"] = false, ["AutoSelectDungeon"] = false,
+    ["MagicFruits"] = false, ["selected_sea_events"] = {}, ["attack_method_golem"] = "Attack",
+    ["AutoRainbowColors"] = false, ["auto_travel_dressrosa"] = false, ["AutoSoulReaper"] = false,
+    ["AutoUnlockedPuzzle"] = false, ["farm_m1_fruit_sea"] = false, ["AutoYamaSword"] = false,
+    ["AutoDarkBladeV3"] = false, ["ChooseBoats"] = "MarineGrandBrigade", ["AutoTeleportToShrineActived"] = false,
+    ["ResetVolcanoAfterCollectingLoot"] = false, ["AutoBuyFruitsFlag"] = false, ["RaceV3Aura"] = false,
+    ["AutoStoreFruitFlag"] = false, ["MaxChestHop"] = 45, ["global_skill_delay"] = 100,
+    ["AutoCollectDinoBones"] = false, ["DungeonMinPlayers"] = 2, ["AutoBigmom"] = false,
+    ["AutoCraftVolcanicMagnet"] = false, ["AutoSailBoat"] = false, ["AutoDragoV3"] = false,
+    ["AutoPullLever"] = false, ["DungeonDifficulty"] = "Normal", ["JumpPowerSlider"] = 50,
+    ["AutoRandomBones"] = false, ["global_skill_weapons"] = {"Melee"}, ["Initialize"] = true,
+    ["AutoTeleportFrozenDimension"] = false, ["AutoUnlockDoughDungeon"] = false, ["AutoFarmMaterialSkullGuitar"] = false,
+    ["EspBerries"] = false, ["auto_mastery_fruits"] = false, ["AutoTryLuck"] = false,
+    ["AutoDragoV1"] = false, ["AutoLeiAccessory"] = false, ["AutoTeleportBarista"] = false,
+    ["selected_farm_target"] = "Auto Level", ["AutoTweenAdvancedFruitDealer"] = false, ["AutoFindMirageIsland"] = false,
+    ["AutoBloxFruit"] = false, ["AutoObservationV2"] = false, ["AutoTushitaCDK"] = false,
+    ["AutoCompleteTrialRace"] = false, ["AutoMirror"] = false, ["AutoCollectMirageChest"] = false,
+    ["AutoBossToggle"] = false, ["AutoDriveToTikiOutport"] = false, ["AutoFarmObservation"] = false,
+    ["KenAura"] = true, ["auto_farm_nearest_range"] = 500, ["AutoSpawnRipIndra"] = false,
+    ["auto_farm_leviathan"] = false, ["hopantirs"] = false, ["AutoTwinHooks"] = false,
+    ["auto_break_bottle"] = false, ["RodSelection"] = "Fishing Rod", ["mastery_island_choice"] = "Cake",
+    ["DisableNotify"] = false, ["AutoKillPlayerAfterTrial"] = false, ["MasterySword"] = false,
+    ["AutoOpenMenuHopFarm"] = false, ["auto_patch_prehistoric"] = false, ["AutoResetLostBoat"] = false,
+    ["AutoRemoveSkyFog"] = false, ["AutoQuestBoss"] = false
+}
+
+local BaseNightHubConfig = {
+    ["Auto Hop Fullmoon"] = false, ["Auto Hop Legendary Sword"] = false,
+    ["Enable Fast Attack"] = true, ["Select Tool"] = "Melee",
+    ["Auto Hop Find Fruits"] = false, ["Auto Ghoul"] = false,
+    ["Auto Hop Mirage Island"] = false, ["Auto Castle Raid"] = false,
+    ["Auto Buso"] = true, ["Auto Hop Kitsune Island"] = false,
+    ["Teleport to Fruits"] = false, ["Auto True Triple Katana"] = false,
+    ["Auto Tushita"] = false, ["Enable Bypass Teleport"] = true,
+    ["Teleport to Berry"] = false, ["Auto Yama"] = false,
+    ["Auto Hop Berry"] = false, ["Auto Buy Legendary Sword"] = false,
+    ["@everyone"] = false, ["Auto Hop Castle Raid"] = false,
+    ["Auto Hop Find Boss"] = false, ["Send Webhook Killed Boss"] = false,
+    ["Select Theme"] = "Dark", ["Auto Hop Prehistoric Island"] = false,
+    ["Auto Hop Near Moon"] = false, ["Start Farm Boss"] = false,
+    ["Tween Speed"] = "180"
+}
+
+local function ensureNightHubKey()
+    local keyPath = "NightHubKey.bin"
+    local expectedKey = "NightHub_c5Rz2UiC1t8E"
+    local needsWrite = true
+
+    if isfile and isfile(keyPath) then
+        local content = nil
+        pcall(function()
+            content = readfile(keyPath)
+        end)
+        if content and content:gsub("%s+", "") == expectedKey then
+            needsWrite = false
+        end
+    end
+
+    if needsWrite and writefile then
+        pcall(function()
+            writefile(keyPath, expectedKey)
+        end)
+    end
+end
+
+local function teleportToSea(seaNumber: number)
+    local cur = getCurrentSea()
+    if cur == seaNumber then return end
+
+    local targetPlaceId = (seaNumber == 2) and SEA_2_ID or SEA_3_ID
+    local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
+
+    if commF then
+        if seaNumber == 2 then
+            pcall(function() commF:InvokeServer("TravelDressrosa") end)
+        elseif seaNumber == 3 then
+            pcall(function() commF:InvokeServer("TravelZou") end)
+        end
+    end
+
+    task.wait(2)
+    TeleportService:Teleport(targetPlaceId, LocalPlayer)
+end
+
+local function saveAndRunRealKid(modifications)
+    if not isfolder("RealKidHub") then makefolder("RealKidHub") end
+    if not isfolder("RealKidHub/save2") then makefolder("RealKidHub/save2") end
+
+    local cfg = {}
+    for k, v in pairs(BaseRealKidConfig) do cfg[k] = v end
+    if modifications then
+        for k, v in pairs(modifications) do cfg[k] = v end
+    end
+
+    local path = "RealKidHub/save2/" .. PlayerName .. ".json"
+    writefile(path, HttpService:JSONEncode(cfg))
+
+    if not Runtime.RealKidExecuted then
+        Runtime.RealKidExecuted = true
+        task.spawn(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/realkidhub/realkid/refs/heads/main/main.lua"))()
+        end)
+    end
+end
+
+local function saveAndRunNightHub(modifications)
+    ensureNightHubKey()
+
+    if not isfolder("Night Hub") then makefolder("Night Hub") end
+    if not isfolder("Night Hub/Hop Boss") then makefolder("Night Hub/Hop Boss") end
+
+    local cfg = {}
+    for k, v in pairs(BaseNightHubConfig) do cfg[k] = v end
+    if modifications then
+        for k, v in pairs(modifications) do cfg[k] = v end
+    end
+
+    local nightSettingsPath = "Night Hub/Hop Boss/Night-" .. PlayerName .. "-Settings.json"
+    writefile(nightSettingsPath, HttpService:JSONEncode(cfg))
+
+    if not Runtime.NightHubExecuted then
+        Runtime.NightHubExecuted = true
+        task.spawn(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/WhiteX1208/Scripts/refs/heads/main/HopScript.luau"))()
+        end)
+    end
+end
+
+-- [[ 6. CHU TRÌNH ĐIỀU KHIỂN CHÍNH ]] --
+local logicThread = task.spawn(function()
+    Runtime.CurrentState = "Selecting Marine Team..."
+    
+    while Runtime.IsRunning do
+        if autoSelectMarines() then break end
+        task.wait(0.5)
+    end
+
+    Runtime.CurrentState = "Waiting for Character Spawn..."
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    Runtime.Character = char
+    char:WaitForChild("HumanoidRootPart", 20)
+    char:WaitForChild("Humanoid", 20)
+    
+    local data = LocalPlayer:WaitForChild("Data", 20)
+    if data then
+        data:WaitForChild("Fragments", 20)
+        data:WaitForChild("Race", 20)
+    end
+
+    task.wait(1.5)
+
+    while Runtime.IsRunning do
+        local currentSea = getCurrentSea()
+        local race = getRace()
+        local frags = getFragments()
+        local hasCyborg = (race == "Cyborg")
+        local hasV3 = isRaceV3()
+
+        -- CASE 1: Chưa có Cyborg
+        if not hasCyborg then
+            if frags < 10000 then
+                Runtime.CurrentState = "No Cyborg & Frags < 10k -> Farm Cake Prince (Sea 3)"
+                if currentSea ~= 3 then
+                    teleportToSea(3)
+                    break
+                else
+                    saveAndRunNightHub({
+                        ["Select Boss"] = "Cake Prince",
+                        ["Auto Hop Find Boss"] = true,
+                        ["Start Farm Boss"] = true
+                    })
+
+                    while Runtime.IsRunning do
+                        task.wait(3)
+                        local updatedFrags = getFragments()
+                        if updatedFrags >= 10000 then
+                            Runtime.CurrentState = "Frags >= 10k! Moving to Sea 2..."
+                            teleportToSea(2)
+                            break
+                        end
+                    end
+                    break
+                end
+            else
+                -- Frags >= 10,000
+                if currentSea ~= 2 then
+                    Runtime.CurrentState = "Frags >= 10k -> Teleporting to Sea 2"
+                    teleportToSea(2)
+                    break
+                else
+                    Runtime.CurrentState = "Running RealKid Auto Cyborg in Sea 2"
+                    saveAndRunRealKid({ ["auto_cyborg"] = true })
+
+                    while Runtime.IsRunning do
+                        task.wait(3)
+                        local curRace = getRace()
+                        local curFrags = getFragments()
+
+                        if curRace == "Cyborg" then
+                            Runtime.CurrentState = "Cyborg Unlocked! Transitioning..."
+                            break
+                        end
+
+                        if curFrags < 1000 then
+                            Runtime.CurrentState = "Frags < 1k during Cyborg -> Return Sea 3"
+                            teleportToSea(3)
+                            break
+                        end
+                    end
+                end
+            end
+
+        -- CASE 2: Đã có Cyborg nhưng chưa V3
+        elseif hasCyborg and not hasV3 then
+            if currentSea ~= 2 then
+                Runtime.CurrentState = "Cyborg (Not V3) -> Moving to Sea 2"
+                teleportToSea(2)
+                break
+            else
+                Runtime.CurrentState = "Running RealKid AutoUpgradeRaceV3 in Sea 2"
+                saveAndRunRealKid({ ["AutoUpgradeRaceV3"] = true })
+
+                while Runtime.IsRunning do
+                    task.wait(3)
+                    if isRaceV3() then
+                        Runtime.CurrentState = "Race V3 Unlocked!"
+                        break
+                    end
+                end
+            end
+
+        -- CASE 3: Đã có Cyborg V3
+        elseif hasCyborg and hasV3 then
+            if currentSea ~= 3 then
+                Runtime.CurrentState = "Cyborg V3 Ready -> Moving to Sea 3"
+                teleportToSea(3)
+                break
+            else
+                Runtime.CurrentState = "Sea 3: Running RealKid Lever + Night Hub Mirage"
+                saveAndRunRealKid({ ["AutoPullLever"] = true })
+                saveAndRunNightHub({ ["Auto Hop Mirage Island"] = true })
+                break
+            end
+        end
+
+        task.wait(2)
+    end
+end)
+table.insert(Runtime.Threads, logicThread)

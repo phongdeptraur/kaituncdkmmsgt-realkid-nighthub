@@ -284,6 +284,7 @@ end
 -- [FIX]: Khai báo sớm các hàm được định nghĩa ở phía dưới script
 local GetCurrentSea
 local ScanCrossContinentalBoss
+local TweenToPosition
 
 -- [FIX]: Hàm kiểm tra bảng có phần tử (hỗ trợ cả Array lẫn Dictionary/Hash Table)
 local function HasTableEntries(tbl)
@@ -2438,16 +2439,14 @@ local function HandleAutoSkullGuitarWorkflow()
             local distToPrePos = (hrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude
             if distToPrePos > 25 then
                 State.CurrentTask = string.format("🛸 [SGT - Sea 2] Đang Pre-Tween tới điểm chờ Darkbeard (còn %.0f studs)...", distToPrePos)
-                if Engine.IsTweening then
-                    return
+                if Engine.StatusLabel then
+                    Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
                 end
-                task.spawn(function()
-                    local ok = TweenTo(SGT_DARKBEARD_PRE_POS, true)
-                    local curHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if ok or (curHrp and (curHrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude <= 25) then
-                        State.DarkbeardPreTweenDone = true
-                    end
-                end)
+                local ok = TweenTo(SGT_DARKBEARD_PRE_POS, true)
+                local curHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if ok or (curHrp and (curHrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude <= 25) then
+                    State.DarkbeardPreTweenDone = true
+                end
                 return
             else
                 State.DarkbeardPreTweenDone = true
@@ -2548,7 +2547,6 @@ local function DirectTweenSegment(targetPos, token, abortBossPatterns, abortOnIn
     -- [FIX TWEEN]: Đứng dậy, hủy Sit, unanchor và dọn dẹp các lực kéo rác do RealKid để lại
     if hum then
         hum.Sit = false
-        pcall(function() hum.PlatformStand = true end)
     end
     hrp.Anchored = false
 
@@ -2637,7 +2635,7 @@ local function DirectTweenSegment(targetPos, token, abortBossPatterns, abortOnIn
 
     if conn then conn:Disconnect() end
     Engine.IsTweening = false
-    if myHum and myHum.Parent then pcall(function() myHum.PlatformStand = false end) end
+    if hum and hum.Parent then pcall(function() hum.PlatformStand = false end) end
     if hrp then
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
@@ -2666,7 +2664,7 @@ local function EscapeSubmergeIsland(token)
     return false
 end
 
-local function TweenToPosition(targetPos, speed, abortBossPatterns, abortOnIndraApi, forceAxiom)
+TweenToPosition = function(targetPos, speed, abortBossPatterns, abortOnIndraApi, forceAxiom)
     if not Engine.IsRunning then return false end
     if (Engine.RealKidMainRunning or Engine.RealKidHopRunning) and not forceAxiom then return false end
     if forceAxiom then
@@ -3454,17 +3452,18 @@ local lblValkyrieItem    = CreateLabel("", 23, nil, true); lblValkyrieItem.Visib
 local lblFractalItem     = CreateLabel("", 41, nil, true); lblFractalItem.Visible = false
 local lblYamaItem        = CreateLabel("", 59, nil, true); lblYamaItem.Visible = false
 
-local lblIndraRadar      = CreateLabel("⚔️ rip_indra: ⚪ | NightAPI: 0 sv", 107, Color3.fromRGB(255, 120, 120), true)
-local lblDoughRadar      = CreateLabel("🍩 Dough King: ⚪ | NightAPI: 0 sv", 125, Color3.fromRGB(255, 160, 220), true)
-local lblCakePrinceRadar = CreateLabel("👑 Cake Prince: ⚪ | NightAPI: 0 sv", 143, Color3.fromRGB(255, 180, 120), true)
-local lblCakeRadar       = CreateLabel("🍰 Cake Queen: ⚪ | NightAPI: 0 sv", 161, Color3.fromRGB(255, 200, 100), true)
-local lblLongmaRadar     = CreateLabel("🐲 Longma: ⚪", 179, Color3.fromRGB(150, 220, 255), true)
-local lblReaperRadar     = CreateLabel("👻 Soul Reaper: ⚪ | NightAPI: 0 sv", 197, Color3.fromRGB(200, 150, 255), true)
-local lblEliteRadar      = CreateLabel("👹 Elite Boss: ⚪ | NightAPI: 0 sv", 215, Color3.fromRGB(255, 140, 70), true)
+local lblDarkbeardRadar  = CreateLabel("🏴‍☠️ Darkbeard (Sea 2): ⚪", 105, Color3.fromRGB(180, 130, 255), true)
+local lblIndraRadar      = CreateLabel("⚔️ rip_indra: ⚪ | NightAPI: 0 sv", 121, Color3.fromRGB(255, 120, 120), true)
+local lblDoughRadar      = CreateLabel("🍩 Dough King: ⚪ | NightAPI: 0 sv", 137, Color3.fromRGB(255, 160, 220), true)
+local lblCakePrinceRadar = CreateLabel("👑 Cake Prince: ⚪ | NightAPI: 0 sv", 153, Color3.fromRGB(255, 180, 120), true)
+local lblCakeRadar       = CreateLabel("🍰 Cake Queen: ⚪ | NightAPI: 0 sv", 169, Color3.fromRGB(255, 200, 100), true)
+local lblLongmaRadar     = CreateLabel("🐲 Longma: ⚪", 185, Color3.fromRGB(150, 220, 255), true)
+local lblReaperRadar     = CreateLabel("👻 Soul Reaper: ⚪ | NightAPI: 0 sv", 201, Color3.fromRGB(200, 150, 255), true)
+local lblEliteRadar      = CreateLabel("👹 Elite Boss: ⚪ | NightAPI: 0 sv", 217, Color3.fromRGB(255, 140, 70), true)
 local lblTorch           = CreateLabel("🔥 Parallel Yama+Tushita | Auto Refresh API 5s | Backpack Fruit Ping", 233, Color3.fromRGB(180, 200, 220), false)
 
 local StandardLabels = {
-    lblTushitaItem, lblValkyrieItem, lblFractalItem, lblYamaItem, lblIndraRadar, lblDoughRadar, lblCakePrinceRadar, lblCakeRadar,
+    lblTushitaItem, lblValkyrieItem, lblFractalItem, lblYamaItem, lblDarkbeardRadar, lblIndraRadar, lblDoughRadar, lblCakePrinceRadar, lblCakeRadar,
     lblLongmaRadar, lblReaperRadar, lblEliteRadar, lblTorch
 }
 
@@ -3997,6 +3996,7 @@ end
 -- [RADAR DAEMON 2S: CẬP NHẬT MÁU BOSS + SỐ SERVER NIGHT HUB API TRÊN UI]
 -- =========================================================================
 local CachedRadarData = {
+    DarkbeardActive = false, DarkbeardStatus = "❌",
     IndraExists = false,
     DoughActive = false, DoughStatus = "❌", DoughModel = nil, DoughRoot = nil, DoughHum = nil,
     CakePrinceActive = false, CakePrinceStatus = "❌", CakePrinceModel = nil, CakePrinceRoot = nil, CakePrinceHum = nil,
@@ -4007,43 +4007,74 @@ local CachedRadarData = {
 }
 
 local function UpdateRadarAndNightApiUI()
-    local indraAct, indraStat = GetBossPercentageStatus({ "rip_indra True Form", "rip_indra" })
-    CachedRadarData.IndraExists = indraAct
+    local isSea2 = CheckIsSea2()
+    local isSea3 = CheckIsSea3()
 
-    local doughAct, doughStat, doughM, doughR, doughH = GetBossPercentageStatus({ "Dough King" })
-    CachedRadarData.DoughActive = doughAct
-    CachedRadarData.DoughStatus = doughStat
-    CachedRadarData.DoughModel = doughM
-    CachedRadarData.DoughRoot = doughR
-    CachedRadarData.DoughHum = doughH
+    local dbAct, dbStat = false, "⚪ [Sea 2]"
+    local indraAct, indraStat = false, "⚪ [Sea 3]"
+    local doughAct, doughStat, doughM, doughR, doughH = false, "⚪ [Sea 3]", nil, nil, nil
+    local cpAct, cpStat, cpM, cpR, cpH = false, "⚪ [Sea 3]", nil, nil, nil
+    local cakeAct, cakeStat = false, "⚪ [Sea 3]"
+    local longmaAct, longmaStat = false, "⚪ [Sea 3]"
+    local reaperAct, reaperStat = false, "⚪ [Sea 3]"
+    local eliteTarget = nil
 
-    local cpAct, cpStat, cpM, cpR, cpH = GetBossPercentageStatus({ "Cake Prince" })
-    CachedRadarData.CakePrinceActive = cpAct
-    CachedRadarData.CakePrinceStatus = cpStat
-    CachedRadarData.CakePrinceModel = cpM
-    CachedRadarData.CakePrinceRoot = cpR
-    CachedRadarData.CakePrinceHum = cpH
+    if isSea2 then
+        -- Khi ở Sea 2: Chỉ check Darkbeard
+        dbAct, dbStat = GetBossPercentageStatus({ "Darkbeard" })
+        CachedRadarData.DarkbeardActive = dbAct
+        CachedRadarData.DarkbeardStatus = dbStat
 
-    local cakeAct, cakeStat = GetBossPercentageStatus({ "Cake Queen" })
-    CachedRadarData.CakeActive = cakeAct
-    CachedRadarData.CakeStatus = cakeStat
+        CachedRadarData.IndraExists = false
+        CachedRadarData.DoughActive = false; CachedRadarData.DoughStatus = indraStat
+        CachedRadarData.CakePrinceActive = false; CachedRadarData.CakePrinceStatus = cpStat
+        CachedRadarData.CakeActive = false; CachedRadarData.CakeStatus = cakeStat
+        CachedRadarData.LongmaActive = false; CachedRadarData.LongmaStatus = longmaStat
+        CachedRadarData.ReaperActive = false; CachedRadarData.ReaperStatus = reaperStat
+        CachedRadarData.EliteTarget = nil; CachedRadarData.EliteStatus = "⚪ [Sea 3]"
+    elseif isSea3 then
+        -- Khi ở Sea 3: Chỉ check các boss Sea 3
+        CachedRadarData.DarkbeardActive = false
+        CachedRadarData.DarkbeardStatus = dbStat
 
-    local longmaAct, longmaStat = GetBossPercentageStatus({ "Longma" })
-    CachedRadarData.LongmaActive = longmaAct
-    CachedRadarData.LongmaStatus = longmaStat
+        indraAct, indraStat = GetBossPercentageStatus({ "rip_indra True Form", "rip_indra" })
+        CachedRadarData.IndraExists = indraAct
 
-    local reaperAct, reaperStat = GetBossPercentageStatus({ "Soul Reaper" })
-    CachedRadarData.ReaperActive = reaperAct
-    CachedRadarData.ReaperStatus = reaperStat
+        doughAct, doughStat, doughM, doughR, doughH = GetBossPercentageStatus({ "Dough King" })
+        CachedRadarData.DoughActive = doughAct
+        CachedRadarData.DoughStatus = doughStat
+        CachedRadarData.DoughModel = doughM
+        CachedRadarData.DoughRoot = doughR
+        CachedRadarData.DoughHum = doughH
 
-    local eliteTarget = scanForElite()
-    CachedRadarData.EliteTarget = eliteTarget
-    if eliteTarget then
-        local eHp, eMax = eliteTarget.Health, eliteTarget.MaxHealth
-        local pct = (eHp and eMax and eMax > 0) and math.clamp(math.floor((eHp / eMax) * 100), 0, 100) or 100
-        CachedRadarData.EliteStatus = string.format("✅ [%d%%] (%s)", pct, eliteTarget.ExactName)
-    else
-        CachedRadarData.EliteStatus = "❌"
+        cpAct, cpStat, cpM, cpR, cpH = GetBossPercentageStatus({ "Cake Prince" })
+        CachedRadarData.CakePrinceActive = cpAct
+        CachedRadarData.CakePrinceStatus = cpStat
+        CachedRadarData.CakePrinceModel = cpM
+        CachedRadarData.CakePrinceRoot = cpR
+        CachedRadarData.CakePrinceHum = cpH
+
+        cakeAct, cakeStat = GetBossPercentageStatus({ "Cake Queen" })
+        CachedRadarData.CakeActive = cakeAct
+        CachedRadarData.CakeStatus = cakeStat
+
+        longmaAct, longmaStat = GetBossPercentageStatus({ "Longma" })
+        CachedRadarData.LongmaActive = longmaAct
+        CachedRadarData.LongmaStatus = longmaStat
+
+        reaperAct, reaperStat = GetBossPercentageStatus({ "Soul Reaper" })
+        CachedRadarData.ReaperActive = reaperAct
+        CachedRadarData.ReaperStatus = reaperStat
+
+        eliteTarget = scanForElite()
+        CachedRadarData.EliteTarget = eliteTarget
+        if eliteTarget then
+            local eHp, eMax = eliteTarget.Health, eliteTarget.MaxHealth
+            local pct = (eHp and eMax and eMax > 0) and math.clamp(math.floor((eHp / eMax) * 100), 0, 100) or 100
+            CachedRadarData.EliteStatus = string.format("✅ [%d%%] (%s)", pct, eliteTarget.ExactName)
+        else
+            CachedRadarData.EliteStatus = "❌"
+        end
     end
 
     if not Engine.InCDKMode then
@@ -4053,6 +4084,11 @@ local function UpdateRadarAndNightApiUI()
         local nCake       = #GetValidNightServers("Cake Queen")
         local nReaper     = #GetValidNightServers("Soul Reaper")
         local nElite      = #GetValidNightServers("Elite Hunter")
+
+        if typeof(lblDarkbeardRadar) ~= "nil" then
+            lblDarkbeardRadar.Text = string.format("🏴‍☠️ Darkbeard: %s", dbStat)
+            lblDarkbeardRadar.TextColor3 = dbAct and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(180, 180, 180)
+        end
 
         lblIndraRadar.Text = string.format("⚔️ rip_indra: %s | NightAPI: %d sv", indraStat, nIndra)
         lblIndraRadar.TextColor3 = (indraAct or nIndra > 0) and Color3.fromRGB(80, 255, 140) or Color3.fromRGB(180, 180, 180)

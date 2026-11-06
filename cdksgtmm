@@ -2062,6 +2062,24 @@ local function ScanBossEntity(patterns)
     return act, child, root, hum
 end
 
+-- // ==============================================================================
+-- // [GET LONGMA - DUAL CONTAINER & CASE-INSENSITIVE SCANNER (STREAMING ENABLED)]
+-- // ==============================================================================
+local function GetLongma()
+    for _, v in pairs(workspace.Enemies:GetChildren()) do
+        if string.find(string.lower(v.Name), "longma") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+            return v
+        end
+    end
+    for _, v in pairs(game:GetService("ReplicatedStorage"):GetChildren()) do
+        if string.find(string.lower(v.Name), "longma") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+            return v
+        end
+    end
+    return nil
+end
+
+
 local CachedTikiBossKilled = nil
 local LastTikiBossCheckTick = 0
 
@@ -3736,8 +3754,8 @@ local function UpdateProgressUI()
     TaskBadges[5].TextColor3 = c5
 
     -- Cập nhật Label trạng thái nếu có
-    if typeof(lblStatus) ~= "nil" and State.CurrentTask then
-        pcall(function() lblStatus.Text = "Trạng thái: " .. tostring(State.CurrentTask) end)
+    if State.CurrentTask then
+        pcall(function() UpdateStatus(tostring(State.CurrentTask), false) end)
     end
 end
 
@@ -3751,6 +3769,27 @@ lblStatus.TextSize = 12
 lblStatus.TextWrapped = true
 lblStatus.TextXAlignment = Enum.TextXAlignment.Left
 Engine.StatusLabel = lblStatus
+
+-- // ==============================================================================
+-- // [SYSTEM PRIORITY LOCK & ANTI-FLICKER UI CONTROLLER]
+-- // ==============================================================================
+local DoingPriorityTask = false
+local CurrentStatusText = ""
+
+local function UpdateStatus(text, isPriority)
+    if DoingPriorityTask and not isPriority then
+        return -- Chặn không cho luồng STT thường ghi đè khi đang làm task ưu tiên
+    end
+    if CurrentStatusText ~= text then
+        CurrentStatusText = text
+        if Engine and Engine.StatusLabel then
+            Engine.StatusLabel.Text = "Trạng thái: " .. text
+        elseif typeof(lblStatus) ~= "nil" then
+            lblStatus.Text = "Trạng thái: " .. text
+        end
+    end
+end
+
 
 local btnHopLowServer = Instance.new("TextButton", mainCard)
 btnHopLowServer.Size = UDim2.new(1, -24, 0, 32)
@@ -4609,12 +4648,14 @@ task.spawn(function()
                             ForceEquipMelee()
                         else
                             Engine.CurrentCombatTarget = nil
-                            lblStatus.Text = "Trạng thái: 🐲 [TUSHITA - CỬA MỞ] Longma trong Server -> Bay tới hang Longma..."
+                            DoingPriorityTask = true
+        UpdateStatus("🐉 [TUSHITA - CỬA MỞ] Đang diệt Longma...", true)
                             TweenToPosition(POS_LONGMA_CAVE, CONFIG.TweenSpeed)
                         end
                     else
                         Engine.CurrentCombatTarget = nil
-                        lblStatus.Text = "Trạng thái: 🌐 [TUSHITA - CỬA MỞ] Không có Longma -> Hop Low Server tìm Longma... " .. timeDisplay
+                        DoingPriorityTask = true
+        UpdateStatus("🐉 [TUSHITA - CỬA MỞ] Đang diệt Longma...", true) .. timeDisplay
                         Engine:HopLowServer()
                     end
                 else
@@ -5688,6 +5729,7 @@ task.spawn(function()
                 end
                 if not it.ValkyrieHelm then
                     State.CurrentTask = "👑 [STT 1 - GetMM] Đang làm nhiệm vụ lấy Valkyrie Helm (Rip_Indra)..."
+                UpdateStatus("👑 [STT 1 - GetMM] Đang làm nhiệm vụ lấy Valkyrie Helm (Rip_Indra)...", false)
                     if typeof(HandleGetValkyrieHelm) == "function" then
                         HandleGetValkyrieHelm()
                     end

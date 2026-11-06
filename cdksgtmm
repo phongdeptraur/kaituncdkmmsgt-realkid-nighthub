@@ -2939,11 +2939,23 @@ end
 
 -- [CƠ CHẾ PRE-TWEEN TUSHITA]: Nếu đã đủ 30/30 Elite hoặc đã có Yama thì Tween đến (5325.75, 1004.77, 275.70) trước khi Hop Indra
 local function EnsurePreTweenBeforeIndraHop(bossPatterns)
+    -- [FIX PARALLEL]: Nếu có Elite Boss hoặc Indra trong server thì KHÔNG Pre-Tween đứng yên nữa
+    if scanForElite() ~= nil then
+        Engine.HasPreTweenedIndra = false
+        return false
+    end
+    if bossPatterns and ScanBossEntity(bossPatterns) then
+        return false
+    end
     if Engine.HasPreTweenedIndra then
         return true
     end
 
     while Engine.IsRunning and not Engine.IsHopping do
+        if scanForElite() ~= nil then
+            Engine.HasPreTweenedIndra = false
+            return false
+        end
         if bossPatterns and ScanBossEntity(bossPatterns) then
             return false
         end
@@ -3530,6 +3542,81 @@ local function scanForElite()
     return nil
 end
 
+
+
+-- // ==============================================================================
+-- // [PARALLEL TUSHITA + YAMA: ELITE HUNTER COMBAT ENGINE (STREAMING-AWARE)]
+-- // ==============================================================================
+local ELITE_SPAWN_NODES = {
+    ["Floating Turtle"] = Vector3.new(-12100, 332, -8700),
+    ["Port Town"]       = Vector3.new(-380, 15, 5320),
+    ["Hydra"]           = Vector3.new(5230, 604, 345)
+}
+
+local function HuntEliteBoss()
+    if not CheckIsSea3() then return false end
+
+    -- Quét Elite hiện tại
+    local elite = scanForElite()
+    if not elite then
+        return false
+    end
+
+    -- Bật cờ khóa ưu tiên để luồng STT thường không giật qua lại
+    DoingPriorityTask = true
+    Engine.RealKidMainRunning = false
+    Engine.RealKidHopRunning = false
+    Engine.NoClipActive = true
+    Engine.FastAttackActive = true
+
+    local eliteName = elite.ExactName or "Elite Boss"
+    local eliteModel = elite.Instance
+
+    -- 1. Kiểm tra StreamingEnabled: Nếu model chưa có trong workspace.Enemies
+    local inEnemies = (eliteModel and eliteModel.Parent == workspace.Enemies) or (workspace.Enemies:FindFirstChild(eliteName) ~= nil)
+    local root = elite.Root or (eliteModel and eliteModel:FindFirstChild("HumanoidRootPart"))
+
+    if not inEnemies or not root or not root:IsDescendantOf(workspace) then
+        local targetPos = (root and root.Position and root.Position.Magnitude > 100) and root.Position or nil
+        if not targetPos then
+            -- Mặc định bay đến đảo Floating Turtle để kích hoạt stream load model
+            targetPos = ELITE_SPAWN_NODES["Floating Turtle"]
+        end
+
+        UpdateStatus(string.format("👹 [PARALLEL YAMA] Phát hiện %s (ReplicatedStorage) -> Bay tới kích hoạt model...", eliteName), true)
+        TweenToPosition(targetPos, (CONFIG and CONFIG.TweenSpeed) or 170, nil, false, true)
+        task.wait(1.5)
+
+        elite = scanForElite()
+        if elite and elite.Instance and elite.Instance.Parent == workspace.Enemies then
+            eliteModel = elite.Instance
+            root = elite.Root or eliteModel:FindFirstChild("HumanoidRootPart")
+        end
+    end
+
+    -- 2. Tiến công tiêu diệt Elite Boss
+    if elite and eliteModel and eliteModel.Parent == workspace.Enemies then
+        local hum = elite.Hum or eliteModel:FindFirstChildOfClass("Humanoid")
+        root = elite.Root or eliteModel:FindFirstChild("HumanoidRootPart") or eliteModel.PrimaryPart
+
+        if root and hum and hum.Health > 0 then
+            Engine.CurrentCombatTarget = eliteModel
+
+            local hp = math.floor(hum.Health)
+            local maxHp = math.floor(hum.MaxHealth > 0 and hum.MaxHealth or 1)
+            UpdateStatus(string.format("⚔️ [PARALLEL YAMA] Đang diệt Elite %s [%d/%d HP]...", eliteName, hp, maxHp), true)
+
+            -- [QUAN TRỌNG]: Truyền abortOnIndraApi = false để KHÔNG bị hủy Tween giữa chừng khi API có Indra
+            FlyOverTarget(root, false)
+
+            EnsureBuso()
+            ForceEquipMelee()
+            return true
+        end
+    end
+
+    return false
+end
 local function GetEliteKills()
     local commF = GetCommF()
     if not commF then return 0 end
@@ -4649,20 +4736,20 @@ task.spawn(function()
                         else
                             Engine.CurrentCombatTarget = nil
                             DoingPriorityTask = true
-        UpdateStatus("🐉 [TUSHITA - CỬA MỞ] Đang diệt Longma...", true)
+        UpdateStatus("🐉 [TUSHITA - CỬA MỞ] Đang diệt Longma.Text = ", true)
                             TweenToPosition(POS_LONGMA_CAVE, CONFIG.TweenSpeed)
                         end
                     else
                         Engine.CurrentCombatTarget = nil
                         DoingPriorityTask = true
-        UpdateStatus("🐉 [TUSHITA - CỬA MỞ] Đang diệt Longma...", true) .. timeDisplay
+        UpdateStatus("🐉 [TUSHITA - CỬA MỞ] Đang diệt Longma.Text = ", true) timeDisplay
                         Engine:HopLowServer()
                     end
                 else
                     -- [OPENED = FALSE]: Chưa bỏ Holy Torch -> Cần lấy Holy Torch đốt 5 đuốc hoặc Hop Indra (NightAPI + RealKidHop)
                     Engine.CurrentCombatTarget = nil
                     if HasHolyTorch() then
-                        lblStatus.Text = "Trạng thái: 🔥 ĐÃ CÓ HOLY TORCH! Đang đốt 5 đuốc mở cổng Tushita..."
+                        lblStatus.Text = "Trạng thái: 🔥 ĐÃ CÓ HOLY TORCH! Đang đốt 5 đuốc mở cổng Tushita.Text = "
                         local commF = GetCommF()
                         if commF then
                             for torchId = 1, 5 do
@@ -5805,5 +5892,20 @@ task.spawn(function()
             State.CurrentTask = "✅ Đã hoàn thành toàn bộ các mục được bật trong AutoConfig!"
         end)
         task.wait(0.5)
+    end
+end)
+
+-- [DAEMON]: Tự động kích hoạt đánh Elite khi đang ở Parallel Tushita & Yama
+task.spawn(function()
+    while Engine.IsRunning do
+        pcall(function()
+            if CheckIsSea3() and (not State.Items.Yama or GetEliteKills() < 30) and not Engine.IsHopping then
+                local elite = scanForElite()
+                if elite and not Engine.CurrentCombatTarget then
+                    HuntEliteBoss()
+                end
+            end
+        end)
+        task.wait(1.5)
     end
 end)

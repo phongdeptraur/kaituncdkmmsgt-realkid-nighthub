@@ -2297,7 +2297,6 @@ end
 -- CÁC HÀM PHỤ TRỢ CHO SKULL GUITAR & HỆ THỐNG REALKID
 -- ==============================================================================
 local SGT_DARKBEARD_PRE_POS = CFrame.new(999.08, 429.45, -5161.50)
-local POS_DARKBEARD_ARENA   = Vector3.new(3777.58, 62.00, -3498.82)
 
 local function StartRealKidWithMode(mode)
     if typeof(SaveRealKidConfig) == "function" then
@@ -2415,7 +2414,7 @@ local function HandleAutoSkullGuitarWorkflow()
         return
     end
 
-    -- 2. Dark Fragment (cần 1) tại Sea 2
+-- 2. Dark Fragment (cần 1) tại Sea 2
     if darkFrag < 1 then
         State.NeedRemainInSea2 = true
         if not isSea2 then
@@ -2423,11 +2422,12 @@ local function HandleAutoSkullGuitarWorkflow()
             return
         end
 
-        -- Giải phóng quyền điều khiển hoàn toàn cho Axiom (không dùng RealKidMain)
+        -- Nhường toàn bộ quyền điều khiển vật lý & đánh nhanh cho Axiom
         Engine.RealKidMainRunning = false
         Engine.RealKidHopRunning = false
         Engine.NoClipActive = true
         Engine.FastAttackActive = true
+        Engine.DesiredSword = nil
 
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -2437,13 +2437,17 @@ local function HandleAutoSkullGuitarWorkflow()
         if hum then hum.Sit = false end
         hrp.Anchored = false
 
-        -- Kiểm tra trực tiếp xem Darkbeard có trong server không
+        -- Kiểm tra nếu có Darkbeard trong server (cả trong Enemies lẫn ReplicatedStorage)
         local dbAct = ScanCrossContinentalBoss({ "Darkbeard" })
         if dbAct or IsDarkbeardSpawned() then
-            -- Vòng lặp khóa mục tiêu và tiêu diệt Darkbeard liên tục (0.1s/nhịp)
             while Engine.IsRunning and State.Running and CheckIsSea2() do
                 local act, hp, maxHp, isInWs, dbModel, dbRoot, dbHum = ScanCrossContinentalBoss({ "Darkbeard" })
                 if not act and not IsDarkbeardSpawned() then
+                    if Engine.CurrentTween then
+                        pcall(function() Engine.CurrentTween:Cancel() end)
+                        Engine.CurrentTween = nil
+                    end
+                    Engine.IsTweening = false
                     Engine.CurrentCombatTarget = nil
                     SyncItemsPreTeamAndInGame()
                     break
@@ -2453,43 +2457,130 @@ local function HandleAutoSkullGuitarWorkflow()
                 Engine.RealKidHopRunning = false
                 Engine.NoClipActive = true
                 Engine.FastAttackActive = true
+                Engine.CurrentCombatTarget = dbModel
 
-                if isInWs and dbModel and dbRoot and dbHum and dbHum.Health > 0 then
-                    -- Boss đã load trong Workspace -> Khóa mục tiêu, bật Haki, cầm Melee và bay trên đầu Boss để đánh
-                    Engine.CurrentCombatTarget = dbModel
-                    State.CurrentTask = string.format(
-                        "⚔️ [SGT - Sea 2] Đang tiêu diệt Darkbeard [HP: %.0f/%.0f]...",
-                        dbHum.Health,
-                        dbHum.MaxHealth
-                    )
-                    if Engine.StatusLabel then
-                        Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
-                    end
-                    FlyOverTarget(dbRoot)
-                    ForceEquipMelee()
-                else
-                    -- Boss đang nằm trong ReplicatedStorage (chưa stream vào Workspace do ở xa) -> Tween tới Dark Arena
-                    Engine.CurrentCombatTarget = nil
-                    local targetArenaPos = (dbRoot and dbRoot.Position) or POS_DARKBEARD_ARENA
-                    local curHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    local dist = curHrp and (curHrp.Position - targetArenaPos).Magnitude or 0
+                local myChar = LocalPlayer.Character
+                local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
 
-                    State.CurrentTask = string.format(
-                        "🛸 [SGT - Sea 2] Phát hiện Darkbeard! Đang Tween tới Dark Arena để load Boss (%.0f studs)...",
-                        dist
-                    )
-                    if Engine.StatusLabel then
-                        Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+                if myHrp and myHum and myHum.Health > 0 then
+                    if myHum.Sit then myHum.Sit = false end
+                    myHrp.Anchored = false
+
+                    -- Giữ bộ chống rơi (__AxiomFlightStabilizer) luôn bật để nhân vật lơ lửng trên đầu Boss
+                    local stabilizer = myHrp:FindFirstChild("__AxiomFlightStabilizer") or Instance.new("BodyVelocity")
+                    stabilizer.Name = "__AxiomFlightStabilizer"
+                    stabilizer.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+                    stabilizer.Velocity = Vector3.zero
+                    stabilizer.Parent = myHrp
+
+                    -- Tự động bật Buso Haki và cầm vũ khí Melee/Sword
+                    if not myChar:FindFirstChild("HasBuso") then
+                        local cf = GetCommF()
+                        if cf then pcall(function() cf:InvokeServer("Buso") end) end
                     end
-                    TweenToPosition(targetArenaPos, CONFIG.TweenSpeed, nil, false, true)
+                    local eqTool = myChar:FindFirstChildOfClass("Tool")
+                    if not eqTool or (eqTool.ToolTip ~= "Melee" and eqTool.ToolTip ~= "Sword") then
+                        local bp = LocalPlayer:FindFirstChild("Backpack")
+                        if bp then
+                            for _, item in ipairs(bp:GetChildren()) do
+                                if item:IsA("Tool") and (item.ToolTip == "Melee" or item.ToolTip == "Sword") then
+                                    pcall(function() myHum:EquipTool(item) end)
+                                    break
+                                end
+                            end
+                        end
+                    end
+
+                    -- Lấy trực tiếp tọa độ của Darkbeard (không qua điểm trung gian Dark Arena)
+                    local bossPos = (dbRoot and dbRoot.Position)
+                        or (dbModel and dbModel:IsA("Model") and dbModel:GetPivot().Position)
+
+                    if bossPos then
+                        local hoverY = (CONFIG and CONFIG.HoverDistanceY) or 18
+                        local targetAboveBoss = bossPos + Vector3.new(0, hoverY, 0)
+                        local dist = (myHrp.Position - targetAboveBoss).Magnitude
+
+                        State.CurrentTask = string.format(
+                            "⚔️ [SGT - Sea 2] Đang tiêu diệt Darkbeard [HP: %.0f/%.0f | Cách: %.0f studs]...",
+                            tonumber(hp) or 0,
+                            tonumber(maxHp) or 500000,
+                            dist
+                        )
+                        if Engine.StatusLabel then
+                            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+                        end
+
+                        if dist <= 25 then
+                            -- Đã ở gần Boss -> Hủy Tween cũ và khóa cứng vị trí ngay trên đầu Boss
+                            if Engine.CurrentTween then
+                                pcall(function() Engine.CurrentTween:Cancel() end)
+                                Engine.CurrentTween = nil
+                            end
+                            Engine.IsTweening = false
+                            myHrp.CFrame = CFrame.new(targetAboveBoss)
+                            myHrp.AssemblyLinearVelocity = Vector3.zero
+                            myHrp.AssemblyAngularVelocity = Vector3.zero
+                        else
+                            -- Đang ở xa hoặc Boss vừa nhảy đi chỗ khác -> Tween thẳng tới đầu Boss và tự cập nhật nếu Boss di chuyển
+                            if Engine.CurrentTween then
+                                pcall(function() Engine.CurrentTween:Cancel() end)
+                                Engine.CurrentTween = nil
+                            end
+                            Engine.IsTweening = true
+                            local speed = (CONFIG and CONFIG.TweenSpeed) or 170
+                            local duration = math.max(dist / speed, 0.05)
+                            local tw = TweenService:Create(
+                                myHrp,
+                                TweenInfo.new(duration, Enum.EasingStyle.Linear),
+                                { CFrame = CFrame.new(targetAboveBoss) }
+                            )
+                            Engine.CurrentTween = tw
+                            tw:Play()
+
+                            -- Theo dõi trong lúc bay: nếu đã tới gần (<= 20 studs) hoặc Boss di chuyển lệch > 20 studs thì cập nhật đường bay mới ngay
+                            local startGoal = targetAboveBoss
+                            while Engine.IsRunning and State.Running and tw.PlaybackState == Enum.PlaybackState.Playing do
+                                task.wait(0.05)
+                                local curChar = LocalPlayer.Character
+                                local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
+                                local curHum = curChar and curChar:FindFirstChildOfClass("Humanoid")
+                                if not curHrp or not curHum or curHum.Health <= 0 then
+                                    pcall(function() tw:Cancel() end)
+                                    break
+                                end
+                                curHrp.AssemblyLinearVelocity = Vector3.zero
+                                curHrp.AssemblyAngularVelocity = Vector3.zero
+
+                                local nowAct, _, _, _, nowModel, nowRoot = ScanCrossContinentalBoss({ "Darkbeard" })
+                                if not nowAct then
+                                    pcall(function() tw:Cancel() end)
+                                    break
+                                end
+                                Engine.CurrentCombatTarget = nowModel
+                                local nowBossPos = (nowRoot and nowRoot.Position)
+                                    or (nowModel and nowModel:IsA("Model") and nowModel:GetPivot().Position)
+
+                                if nowBossPos then
+                                    local nowTargetAbove = nowBossPos + Vector3.new(0, hoverY, 0)
+                                    -- Nếu đã bay sát đầu Boss hoặc Boss nhảy sang vị trí mới cách điểm cũ > 20 studs -> Ngắt để khóa theo vị trí mới
+                                    if (curHrp.Position - nowTargetAbove).Magnitude <= 20 or (nowTargetAbove - startGoal).Magnitude > 20 then
+                                        pcall(function() tw:Cancel() end)
+                                        break
+                                    end
+                                end
+                            end
+                            Engine.IsTweening = false
+                        end
+                    end
                 end
 
-                task.wait(0.1)
+                task.wait(0.05)
             end
             return
         end
 
-        -- Nếu KHÔNG có Darkbeard trong server -> Pre-Tween tới điểm chờ rồi mới chạy RealKidHop
+        -- Nếu KHÔNG có Darkbeard trong server -> Pre-Tween tới điểm chờ rồi chạy RealKidHop
         Engine.CurrentCombatTarget = nil
         if not State.DarkbeardPreTweenDone then
             local distToPrePos = (hrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude
@@ -2498,7 +2589,6 @@ local function HandleAutoSkullGuitarWorkflow()
                 if Engine.StatusLabel then
                     Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
                 end
-                -- Truyền {"Darkbeard"} vào abortBossPatterns để tự ngắt Pre-Tween ngay nếu Boss xuất hiện giữa chừng
                 local ok = TweenToPosition(SGT_DARKBEARD_PRE_POS.Position, CONFIG.TweenSpeed, { "Darkbeard" }, false, true)
                 local curHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if ok or (curHrp and (curHrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude <= 25) then

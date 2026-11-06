@@ -32,8 +32,8 @@ repeat task.wait(0.05) until LocalPlayer
 -- CẤU HÌNH NHIỆM VỤ TỔNG (BẬT/TẮT TÙY Ý - THỨ TỰ ƯU TIÊN 1 -> 5)
 -- ==============================================================================
 getgenv().AutoConfig = getgenv().AutoConfig or {
-    ["GetMM"]  = false, -- STT 1 (Valkyrie Helm) & STT 2 (Mirror Fractal)
-    ["GetCDK"] = false, -- STT 3 (Tushita) & STT 4 (Yama) -> 350 Mas -> 6 Quest -> Get CDK
+    ["GetMM"]  = true, -- STT 1 (Valkyrie Helm) & STT 2 (Mirror Fractal)
+    ["GetCDK"] = true, -- STT 3 (Tushita) & STT 4 (Yama) -> 350 Mas -> 6 Quest -> Get CDK
     ["GetSGT"] = true, -- STT 5 (Skull Guitar: Ectoplasm -> Dark Fragment -> Bones -> Full Moon)
 }
 

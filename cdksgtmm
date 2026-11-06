@@ -2329,8 +2329,12 @@ local function HopLowPlayerServer()
 end
 
 local function TweenTo(targetPos, safe)
+    -- [FIX TWEEN]: Giải phóng quyền điều khiển cho Axiom và dọn dẹp cờ RealKid
+    Engine.RealKidMainRunning = false
+    Engine.RealKidHopRunning = false
+    Engine.NoClipActive = true
     if typeof(TweenToPosition) == "function" then
-        return TweenToPosition(targetPos, (CONFIG and CONFIG.TweenSpeed) or 170)
+        return TweenToPosition(targetPos, (CONFIG and CONFIG.TweenSpeed) or 170, nil, nil, true)
     end
     return false
 end
@@ -2417,16 +2421,33 @@ local function HandleAutoSkullGuitarWorkflow()
             return
         end
 
+        -- [FIX TWEEN]: Tắt triệt để cờ RealKid trước khi Tween để nhường toàn quyền cho Axiom
+        Engine.RealKidMainRunning = false
+        Engine.RealKidHopRunning = false
+        Engine.NoClipActive = true
+
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
 
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Sit = false end
+        hrp.Anchored = false
+
         if not State.DarkbeardPreTweenDone then
-            if (hrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude > 15 then
-                State.CurrentTask = "🛸 [SGT - Sea 2] Đang Pre-Tween tới điểm chờ Darkbeard (999.08, 429.45, -5161.50)..."
-                if TweenTo(SGT_DARKBEARD_PRE_POS, true) then
-                    State.DarkbeardPreTweenDone = true
+            local distToPrePos = (hrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude
+            if distToPrePos > 25 then
+                State.CurrentTask = string.format("🛸 [SGT - Sea 2] Đang Pre-Tween tới điểm chờ Darkbeard (còn %.0f studs)...", distToPrePos)
+                if Engine.IsTweening then
+                    return
                 end
+                task.spawn(function()
+                    local ok = TweenTo(SGT_DARKBEARD_PRE_POS, true)
+                    local curHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if ok or (curHrp and (curHrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude <= 25) then
+                        State.DarkbeardPreTweenDone = true
+                    end
+                end)
                 return
             else
                 State.DarkbeardPreTweenDone = true
@@ -2521,7 +2542,21 @@ end
 local function DirectTweenSegment(targetPos, token, abortBossPatterns, abortOnIndraApi)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not Engine.IsRunning or (token and Engine.CurrentTweenToken ~= token) then return false end
+
+    -- [FIX TWEEN]: Đứng dậy, hủy Sit, unanchor và dọn dẹp các lực kéo rác do RealKid để lại
+    if hum then
+        hum.Sit = false
+        pcall(function() hum.PlatformStand = true end)
+    end
+    hrp.Anchored = false
+
+    for _, obj in ipairs(hrp:GetChildren()) do
+        if (obj:IsA("BodyMover") or obj:IsA("AlignPosition") or obj:IsA("LinearVelocity") or obj:IsA("VectorForce")) and obj.Name ~= "__AxiomFlightStabilizer" then
+            pcall(function() obj:Destroy() end)
+        end
+    end
 
     if Engine.CurrentTween then
         pcall(function() Engine.CurrentTween:Cancel() end)
@@ -2538,15 +2573,18 @@ local function DirectTweenSegment(targetPos, token, abortBossPatterns, abortOnIn
     stabilizer.Parent = hrp
 
     Engine.IsTweening = true
+    Engine.NoClipActive = true
     local targetV3 = (typeof(targetPos) == "CFrame" and targetPos.Position) or targetPos
     local dist = (hrp.Position - targetV3).Magnitude
-    if dist <= 8 then
+    if dist <= 15 then
         hrp.CFrame = CFrame.new(targetV3)
         Engine.IsTweening = false
+        if hum and hum.Parent then pcall(function() hum.PlatformStand = false end) end
         return true
     end
 
-    local duration = math.max(dist / CONFIG.TweenSpeed, 0.05)
+    local speed = (CONFIG and CONFIG.TweenSpeed) or 170
+    local duration = math.max(dist / speed, 0.05)
     local tw = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), { CFrame = CFrame.new(targetV3) })
     Engine.CurrentTween = tw
 
@@ -2569,6 +2607,8 @@ local function DirectTweenSegment(targetPos, token, abortBossPatterns, abortOnIn
             Engine.IsTweening = false
             return false
         end
+        if myHum.Sit then myHum.Sit = false end
+        hrp.Anchored = false
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
 
@@ -2576,6 +2616,7 @@ local function DirectTweenSegment(targetPos, token, abortBossPatterns, abortOnIn
             pcall(function() tw:Cancel() end)
             if conn then conn:Disconnect() end
             Engine.IsTweening = false
+            if myHum and myHum.Parent then pcall(function() myHum.PlatformStand = false end) end
             return false
         end
 
@@ -2583,10 +2624,11 @@ local function DirectTweenSegment(targetPos, token, abortBossPatterns, abortOnIn
             pcall(function() tw:Cancel() end)
             if conn then conn:Disconnect() end
             Engine.IsTweening = false
+            if myHum and myHum.Parent then pcall(function() myHum.PlatformStand = false end) end
             return false
         end
 
-        if (hrp.Position - targetV3).Magnitude <= 8 then
+        if (hrp.Position - targetV3).Magnitude <= 15 then
             pcall(function() tw:Cancel() end)
             completed = true
             break
@@ -2595,6 +2637,7 @@ local function DirectTweenSegment(targetPos, token, abortBossPatterns, abortOnIn
 
     if conn then conn:Disconnect() end
     Engine.IsTweening = false
+    if myHum and myHum.Parent then pcall(function() myHum.PlatformStand = false end) end
     if hrp then
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
@@ -2623,8 +2666,14 @@ local function EscapeSubmergeIsland(token)
     return false
 end
 
-local function TweenToPosition(targetPos, _, abortBossPatterns, abortOnIndraApi)
-    if not Engine.IsRunning or Engine.RealKidMainRunning or Engine.RealKidHopRunning then return false end
+local function TweenToPosition(targetPos, speed, abortBossPatterns, abortOnIndraApi, forceAxiom)
+    if not Engine.IsRunning then return false end
+    if (Engine.RealKidMainRunning or Engine.RealKidHopRunning) and not forceAxiom then return false end
+    if forceAxiom then
+        Engine.RealKidMainRunning = false
+        Engine.RealKidHopRunning = false
+        Engine.NoClipActive = true
+    end
     Engine.CurrentTweenToken = (Engine.CurrentTweenToken or 0) + 1
     local token = Engine.CurrentTweenToken
 

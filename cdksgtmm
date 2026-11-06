@@ -2361,9 +2361,15 @@ local function TeleportToSea3()
 end
 
 local function IsDarkbeardSpawned()
-    local act, hp, maxHp, inWs, model, root, hum = ScanCrossContinentalBoss({ "Darkbeard" })
-    if act then return true, model, root, hum end
-    return false, nil, nil, nil
+    local enemies = workspace:FindFirstChild("Enemies")
+    if enemies and enemies:FindFirstChild("Darkbeard") then
+        local boss = enemies:FindFirstChild("Darkbeard")
+        local hum = boss:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then return true end
+    end
+    local rsBoss = ReplicatedStorage:FindFirstChild("Darkbeard")
+    if rsBoss then return true end
+    return false
 end
 
 local function IsFullMoonNow()
@@ -2416,7 +2422,7 @@ local function HandleAutoSkullGuitarWorkflow()
             return
         end
 
-        -- Tắt triệt để cờ RealKid để nhường toàn quyền điều khiển di chuyển & chiến đấu cho Axiom
+        -- [FIX TWEEN]: Tắt triệt để cờ RealKid trước khi Tween để nhường toàn quyền cho Axiom
         Engine.RealKidMainRunning = false
         Engine.RealKidHopRunning = false
         Engine.NoClipActive = true
@@ -2429,38 +2435,29 @@ local function HandleAutoSkullGuitarWorkflow()
         if hum then hum.Sit = false end
         hrp.Anchored = false
 
-        -- Quét trực tiếp Darkbeard ngay khi vừa chọn Team/vào Server
-        local dbAct, dbHp, dbMaxHp, dbInWs, dbModel, dbRoot, dbHum = ScanCrossContinentalBoss({ "Darkbeard" })
-        local isDarkbeardPresent = dbAct or IsDarkbeardSpawned()
-
-        if isDarkbeardPresent then
-            -- Có Darkbeard trong Server -> Tới kill luôn bằng Axiom, KHÔNG bật RealKid Main
-            if dbModel and dbRoot and dbHum and dbHum.Health > 0 then
-                Engine.CurrentCombatTarget = dbModel
-                local pct = (dbHp and dbMaxHp and dbMaxHp > 0) and math.floor((dbHp / dbMaxHp) * 100) or 100
-                State.CurrentTask = string.format("⚔️ [SGT - Sea 2] Đang diệt Boss Darkbeard [%.0f/%.0f HP - %d%%]...", dbHum.Health, dbHum.MaxHealth, pct)
+        if not State.DarkbeardPreTweenDone then
+            local distToPrePos = (hrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude
+            if distToPrePos > 25 then
+                State.CurrentTask = string.format("🛸 [SGT - Sea 2] Đang Pre-Tween tới điểm chờ Darkbeard (còn %.0f studs)...", distToPrePos)
                 if Engine.StatusLabel then
                     Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
                 end
-                FlyOverTarget(dbRoot)
-                ForceEquipMelee()
+                local ok = TweenTo(SGT_DARKBEARD_PRE_POS, true)
+                local curHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if ok or (curHrp and (curHrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude <= 25) then
+                    State.DarkbeardPreTweenDone = true
+                end
+                return
             else
-                -- Darkbeard đã spawn nhưng Model/Root chưa kịp load về client -> Bay thẳng tới Dark Arena
-                Engine.CurrentCombatTarget = nil
-                State.CurrentTask = "🛸 [SGT - Sea 2] Phát hiện Darkbeard! Đang bay thẳng tới hang Darkbeard..."
-                if Engine.StatusLabel then
-                    Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
-                end
-                TweenTo(SGT_DARKBEARD_PRE_POS, true)
-                ForceEquipMelee()
+                State.DarkbeardPreTweenDone = true
             end
+        end
+
+        if IsDarkbeardSpawned() then
+            State.CurrentTask = "⚔️ [SGT - Sea 2] Phát hiện Boss Darkbeard! Bật RealKid [AutoFarmMaterialSkullGuitar]..."
+            StartRealKidWithMode("FarmMatSGT")
         else
-            -- Server không có Darkbeard -> Chạy RealKidHop đi tìm server Darkbeard ngay (không Pre-Tween chờ vô ích)
-            Engine.CurrentCombatTarget = nil
             State.CurrentTask = "🔍 [SGT - Sea 2] Không có Darkbeard -> Chạy RealKidHop [Destination: Darkbeard]..."
-            if Engine.StatusLabel then
-                Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
-            end
             StartRealKidHop("Darkbeard")
         end
         return
@@ -2963,10 +2960,9 @@ local magnetConn = RunService.Stepped:Connect(function()
     if Engine.CurrentCombatTarget and Engine.CurrentCombatTarget.Parent then
         local tName = Engine.CurrentCombatTarget.Name:lower()
         if tName:find("dough king") or tName:find("indra") or tName:find("longma")
-            or tName:find("darkbeard") or tName:find("diablo") or tName:find("deandre") or tName:find("urban") then
+            or tName:find("diablo") or tName:find("deandre") or tName:find("urban") then
             isBossNoBring = true
         end
-    end
     end
     if not Engine.IsRunning or Engine.RealKidMainRunning or not Engine.BringMob or not _G.BringMobs or Engine.IsHopping or Engine.ActiveCDKMode == "Yama1" or Engine.ActiveCDKMode == "Tushita1" or Engine.WaitReaper or Engine.CurrentGood == -3 or isBossNoBring then
         if next(MagnetRegistry) or StaticClusterPos then ClearAllMagnetMobs() end

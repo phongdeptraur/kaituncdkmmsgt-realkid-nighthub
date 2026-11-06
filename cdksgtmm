@@ -2058,27 +2058,9 @@ ScanCrossContinentalBoss = function(bossPatterns)
 end
 
 local function ScanBossEntity(patterns)
-    local act, _, _, _, child, root, hum = ScanCrossContinentalBoss(patterns)
-    return act, child, root, hum
+    local act, _, _, isInWs, child, root, hum = ScanCrossContinentalBoss(patterns)
+    return act, child, root, hum, isInWs
 end
-
--- // ==============================================================================
--- // [GET LONGMA - DUAL CONTAINER & CASE-INSENSITIVE SCANNER (STREAMING ENABLED)]
--- // ==============================================================================
-local function GetLongma()
-    for _, v in pairs(workspace.Enemies:GetChildren()) do
-        if string.find(string.lower(v.Name), "longma") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-            return v
-        end
-    end
-    for _, v in pairs(game:GetService("ReplicatedStorage"):GetChildren()) do
-        if string.find(string.lower(v.Name), "longma") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-            return v
-        end
-    end
-    return nil
-end
-
 
 local CachedTikiBossKilled = nil
 local LastTikiBossCheckTick = 0
@@ -2395,6 +2377,17 @@ end
 
 local function IsFullMoonNow()
     local lighting = game:GetService("Lighting")
+    if not lighting then return false end
+
+    -- 1. Kiểm tra trời tối (Ban đêm trong Blox Fruits: từ 18:00 tối đến trước 05:00 sáng)
+    -- Nếu từ 05:00 sáng đến trước 18:00 tối -> Trời sáng -> Coi như CHƯA Full Moon
+    local clockTime = tonumber(lighting.ClockTime) or 12
+    local isNightTime = (clockTime >= 18 or clockTime < 5)
+    if not isNightTime then
+        return false
+    end
+
+    -- 2. Kiểm tra Texture Mặt Trăng phải là Full Moon (9709149431)
     local sky = lighting:FindFirstChildOfClass("Sky")
     if sky and sky.MoonTextureId then
         if tostring(sky.MoonTextureId):find("9709149431") then
@@ -2911,14 +2904,18 @@ TweenToPosition = function(targetPos, speed, abortBossPatterns, abortOnIndraApi,
 end
 
 local function FlyOverTarget(targetPart, abortOnIndraApi)
-    if Engine.RealKidMainRunning or Engine.RealKidHopRunning then return end
+    -- Khi Axiom đã gọi FlyOverTarget tức là đang chủ động đánh Boss -> Mở khóa vật lý Axiom
+    Engine.RealKidMainRunning = false
+    Engine.RealKidHopRunning = false
+    Engine.NoClipActive = true
+
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp or not targetPart or not targetPart.Parent then return end
 
     local targetCombatPos = targetPart.Position + Vector3.new(0, CONFIG.HoverDistanceY, 0)
     if (hrp.Position - targetCombatPos).Magnitude > 22 then
-        TweenToPosition(targetCombatPos, CONFIG.TweenSpeed, nil, abortOnIndraApi)
+        TweenToPosition(targetCombatPos, CONFIG.TweenSpeed, nil, abortOnIndraApi, true)
     else
         hrp.CFrame = CFrame.lookAt(targetCombatPos, targetPart.Position)
         hrp.AssemblyLinearVelocity = Vector3.zero
@@ -2939,23 +2936,11 @@ end
 
 -- [CƠ CHẾ PRE-TWEEN TUSHITA]: Nếu đã đủ 30/30 Elite hoặc đã có Yama thì Tween đến (5325.75, 1004.77, 275.70) trước khi Hop Indra
 local function EnsurePreTweenBeforeIndraHop(bossPatterns)
-    -- [FIX PARALLEL]: Nếu có Elite Boss hoặc Indra trong server thì KHÔNG Pre-Tween đứng yên nữa
-    if scanForElite() ~= nil then
-        Engine.HasPreTweenedIndra = false
-        return false
-    end
-    if bossPatterns and ScanBossEntity(bossPatterns) then
-        return false
-    end
     if Engine.HasPreTweenedIndra then
         return true
     end
 
     while Engine.IsRunning and not Engine.IsHopping do
-        if scanForElite() ~= nil then
-            Engine.HasPreTweenedIndra = false
-            return false
-        end
         if bossPatterns and ScanBossEntity(bossPatterns) then
             return false
         end
@@ -3542,81 +3527,6 @@ local function scanForElite()
     return nil
 end
 
-
-
--- // ==============================================================================
--- // [PARALLEL TUSHITA + YAMA: ELITE HUNTER COMBAT ENGINE (STREAMING-AWARE)]
--- // ==============================================================================
-local ELITE_SPAWN_NODES = {
-    ["Floating Turtle"] = Vector3.new(-12100, 332, -8700),
-    ["Port Town"]       = Vector3.new(-380, 15, 5320),
-    ["Hydra"]           = Vector3.new(5230, 604, 345)
-}
-
-local function HuntEliteBoss()
-    if not CheckIsSea3() then return false end
-
-    -- Quét Elite hiện tại
-    local elite = scanForElite()
-    if not elite then
-        return false
-    end
-
-    -- Bật cờ khóa ưu tiên để luồng STT thường không giật qua lại
-    DoingPriorityTask = true
-    Engine.RealKidMainRunning = false
-    Engine.RealKidHopRunning = false
-    Engine.NoClipActive = true
-    Engine.FastAttackActive = true
-
-    local eliteName = elite.ExactName or "Elite Boss"
-    local eliteModel = elite.Instance
-
-    -- 1. Kiểm tra StreamingEnabled: Nếu model chưa có trong workspace.Enemies
-    local inEnemies = (eliteModel and eliteModel.Parent == workspace.Enemies) or (workspace.Enemies:FindFirstChild(eliteName) ~= nil)
-    local root = elite.Root or (eliteModel and eliteModel:FindFirstChild("HumanoidRootPart"))
-
-    if not inEnemies or not root or not root:IsDescendantOf(workspace) then
-        local targetPos = (root and root.Position and root.Position.Magnitude > 100) and root.Position or nil
-        if not targetPos then
-            -- Mặc định bay đến đảo Floating Turtle để kích hoạt stream load model
-            targetPos = ELITE_SPAWN_NODES["Floating Turtle"]
-        end
-
-        UpdateStatus(string.format("👹 [PARALLEL YAMA] Phát hiện %s (ReplicatedStorage) -> Bay tới kích hoạt model...", eliteName), true)
-        TweenToPosition(targetPos, (CONFIG and CONFIG.TweenSpeed) or 170, nil, false, true)
-        task.wait(1.5)
-
-        elite = scanForElite()
-        if elite and elite.Instance and elite.Instance.Parent == workspace.Enemies then
-            eliteModel = elite.Instance
-            root = elite.Root or eliteModel:FindFirstChild("HumanoidRootPart")
-        end
-    end
-
-    -- 2. Tiến công tiêu diệt Elite Boss
-    if elite and eliteModel and eliteModel.Parent == workspace.Enemies then
-        local hum = elite.Hum or eliteModel:FindFirstChildOfClass("Humanoid")
-        root = elite.Root or eliteModel:FindFirstChild("HumanoidRootPart") or eliteModel.PrimaryPart
-
-        if root and hum and hum.Health > 0 then
-            Engine.CurrentCombatTarget = eliteModel
-
-            local hp = math.floor(hum.Health)
-            local maxHp = math.floor(hum.MaxHealth > 0 and hum.MaxHealth or 1)
-            UpdateStatus(string.format("⚔️ [PARALLEL YAMA] Đang diệt Elite %s [%d/%d HP]...", eliteName, hp, maxHp), true)
-
-            -- [QUAN TRỌNG]: Truyền abortOnIndraApi = false để KHÔNG bị hủy Tween giữa chừng khi API có Indra
-            FlyOverTarget(root, false)
-
-            EnsureBuso()
-            ForceEquipMelee()
-            return true
-        end
-    end
-
-    return false
-end
 local function GetEliteKills()
     local commF = GetCommF()
     if not commF then return 0 end
@@ -3841,8 +3751,8 @@ local function UpdateProgressUI()
     TaskBadges[5].TextColor3 = c5
 
     -- Cập nhật Label trạng thái nếu có
-    if State.CurrentTask then
-        pcall(function() UpdateStatus(tostring(State.CurrentTask), false) end)
+    if typeof(lblStatus) ~= "nil" and State.CurrentTask and Engine.CurrentObjective == "SkullGuitar" then
+        pcall(function() lblStatus.Text = "Trạng thái: " .. tostring(State.CurrentTask) end)
     end
 end
 
@@ -3856,27 +3766,6 @@ lblStatus.TextSize = 12
 lblStatus.TextWrapped = true
 lblStatus.TextXAlignment = Enum.TextXAlignment.Left
 Engine.StatusLabel = lblStatus
-
--- // ==============================================================================
--- // [SYSTEM PRIORITY LOCK & ANTI-FLICKER UI CONTROLLER]
--- // ==============================================================================
-local DoingPriorityTask = false
-local CurrentStatusText = ""
-
-local function UpdateStatus(text, isPriority)
-    if DoingPriorityTask and not isPriority then
-        return -- Chặn không cho luồng STT thường ghi đè khi đang làm task ưu tiên
-    end
-    if CurrentStatusText ~= text then
-        CurrentStatusText = text
-        if Engine and Engine.StatusLabel then
-            Engine.StatusLabel.Text = "Trạng thái: " .. text
-        elseif typeof(lblStatus) ~= "nil" then
-            lblStatus.Text = "Trạng thái: " .. text
-        end
-    end
-end
-
 
 local btnHopLowServer = Instance.new("TextButton", mainCard)
 btnHopLowServer.Size = UDim2.new(1, -24, 0, 32)
@@ -4154,10 +4043,17 @@ local function CheckHasYama()
 end
 
 local function IsTushitaGateOpened()
+    if State.RemoteProgress and State.RemoteProgress.TushitaOpenedDoor == true then
+        return true
+    end
     local commF = GetCommF()
     if not commF then return false end
-    local prog = SafeInvokeServer(commF, 1.0, "TushitaProgress")
-    return type(prog) == "table" and prog.OpenedDoor == true
+    local prog = SafeInvokeServer(commF, 1.5, "TushitaProgress")
+    if (type(prog) == "table" and prog.OpenedDoor == true) or prog == true then
+        if State.RemoteProgress then State.RemoteProgress.TushitaOpenedDoor = true end
+        return true
+    end
+    return false
 end
 
 local function HasHolyTorch()
@@ -4725,156 +4621,20 @@ task.spawn(function()
 
                 if gateOpened then
                     -- [OPENED = TRUE]: Đã bỏ Holy Torch rồi -> Chỉ cần kill Longma, nếu server ko có Longma thì Hop Low để tìm Longma
-                    local longmaAct, _, _, _, longmaModel, longmaRoot, longmaHum = ScanCrossContinentalBoss({ "Longma" })
+                    local longmaAct, _, _, isInWs, longmaModel, longmaRoot, longmaHum = ScanCrossContinentalBoss({ "Longma" })
 
-                    if longmaAct then
-                        if longmaRoot and longmaHum and longmaHum.Health > 0 then
-                            Engine.CurrentCombatTarget = longmaModel
-                            lblStatus.Text = string.format("Trạng thái: 🐲 [TUSHITA - CỬA MỞ] Đang diệt Longma [%.0f/%.0f HP]...", longmaHum.Health, longmaHum.MaxHealth)
-                            FlyOverTarget(longmaRoot)
-                            ForceEquipMelee()
-                        else
-                            Engine.CurrentCombatTarget = nil
-                            DoingPriorityTask = true
-        UpdateStatus("🐉 [TUSHITA - CỬA MỞ] Đang diệt Longma.Text = ", true)
-                            TweenToPosition(POS_LONGMA_CAVE, CONFIG.TweenSpeed)
-                        end
-                    else
-                        Engine.CurrentCombatTarget = nil
-                        DoingPriorityTask = true
-        UpdateStatus("🐉 [TUSHITA - CỬA MỞ] Đang diệt Longma.Text = ", true) timeDisplay
-                        Engine:HopLowServer()
-                    end
-                else
-                    -- [OPENED = FALSE]: Chưa bỏ Holy Torch -> Cần lấy Holy Torch đốt 5 đuốc hoặc Hop Indra (NightAPI + RealKidHop)
-                    Engine.CurrentCombatTarget = nil
-                    if HasHolyTorch() then
-                        lblStatus.Text = "Trạng thái: 🔥 ĐÃ CÓ HOLY TORCH! Đang đốt 5 đuốc mở cổng Tushita.Text = "
-                        local commF = GetCommF()
-                        if commF then
-                            for torchId = 1, 5 do
-                                pcall(function() commF:InvokeServer("TushitaProgress", "Torch", torchId) end)
-                                task.wait(0.2)
-                            end
-                        end
-                    else
-                        local indraAct = CachedRadarData.IndraExists or ScanBossEntity({ "rip_indra True Form", "rip_indra" })
-                        if indraAct then
-                            while Engine.IsRunning and not HasHolyTorch() and not Engine.IsHopping do
-                                lblStatus.Text = "Trạng thái: 🔥 [TUSHITA] Có Rip Indra! Tween tới Waterfall lấy Holy Torch..."
-                                TweenToPosition(POS_HOLY_TORCH_TOWER, CONFIG.TweenSpeed)
-
-                                local currentChar = LocalPlayer.Character
-                                local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
-                                if currentHrp then
-                                    currentHrp.CFrame = CFrame.new(POS_HOLY_TORCH_TOWER)
-                                    Engine.NoClipActive = false
-                                    currentHrp.Anchored = false
-                                    currentHrp.AssemblyLinearVelocity = Vector3.zero
-                                    local s1 = currentHrp:FindFirstChild("__AxiomFlightStabilizer")
-                                    if s1 then s1:Destroy() end
-                                    for _, part in ipairs(currentChar:GetDescendants()) do
-                                        if part:IsA("BasePart") then part.CanCollide = true; part.CanTouch = true end
-                                    end
-                                    task.wait(1.0)
-                                    Engine.NoClipActive = true
-                                end
-                                if HasHolyTorch() or not ScanBossEntity({ "rip_indra True Form", "rip_indra" }) then break end
-                            end
-                        else
-                            -- Nếu đã đủ điều kiện 30/30 Elite Yama hoặc đã có sẵn Yama trước khi get Tushita:
-                            -- Bắt buộc Pre-Tween đến điểm (5325.75, 1004.77, 275.70) trước khi Hop Indra (NightAPI + RealKidHop)
-                            if hasYama or Engine.EliteKills >= 30 then
-                                local indraPatterns = { "rip_indra", "rip_indra True Form" }
-                                local arrivedPrePoint = EnsurePreTweenBeforeIndraHop(indraPatterns)
-                                if arrivedPrePoint and VerifyBossAbsent(indraPatterns) then
-                                    lblStatus.Text = "Trạng thái: 🌐 [TUSHITA - PRETWEEN XONG] Bật RealKidHop + NightAPI (Rip Indra)... " .. timeDisplay
-                                    DispatchRealKidHop("Rip Indra", true)
-                                end
-                            else
-                                -- Chưa có Yama và Elite < 30: Chạy song song tìm Indra (NightAPI + RealKidHop) kết hợp săn Elite
-                                DispatchRealKidHop("Rip Indra", false)
-
-                                local indraNightServers = GetValidNightServers("Rip Indra")
-                                if #indraNightServers > 0 then
-                                    Engine.CurrentCombatTarget = nil
-                                    if Engine.CurrentTween then
-                                        pcall(function() Engine.CurrentTween:Cancel() end)
-                                        Engine.CurrentTween = nil
-                                    end
-                                    lblStatus.Text = string.format("Trạng thái: 🚨 [NIGHT API] Phát hiện %d server Rip Indra! Dừng Elite -> Join Indra ngay!", #indraNightServers)
-                                    JoinAllNightApiServers("Rip Indra")
-                                else
-                                    local eliteTarget = CachedRadarData.EliteTarget or scanForElite()
-                                    if eliteTarget and eliteTarget.Instance and eliteTarget.Root then
-                                        pcall(function()
-                                            local commF = GetCommF()
-                                            if commF then commF:InvokeServer("EliteHunter") end
-                                        end)
-
-                                        Engine.CurrentCombatTarget = eliteTarget.Instance
-                                        lblStatus.Text = string.format("Trạng thái: 👹 [PARALLEL YAMA+TUSHITA] Đang diệt Elite %s [HP: %.0f | %d/30] & Canh API Indra...", eliteTarget.ExactName, eliteTarget.Health, Engine.EliteKills)
-                                        FlyOverTarget(eliteTarget.Root, true)
-                                        ForceEquipMelee()
-                                    else
-                                        Engine.CurrentCombatTarget = nil
-                                        local eliteNightServers = GetValidNightServers("Elite Hunter")
-                                        if #eliteNightServers > 0 then
-                                            lblStatus.Text = string.format("Trạng thái: 🌐 [PARALLEL YAMA+TUSHITA] Ko có Indra -> Hop NightAPI Elite (%d sv) [Elite: %d/30]...", #eliteNightServers, Engine.EliteKills)
-                                            JoinAllNightApiServers("Elite Hunter")
-                                        else
-                                            lblStatus.Text = string.format("Trạng thái: 🔍 [PARALLEL YAMA+TUSHITA] Đang chờ NightAPI Indra/Elite & RealKidHop Indra [Elite: %d/30]... %s", Engine.EliteKills, timeDisplay)
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-
-            -- =====================================================================
-            -- 2. CƠ CHẾ GET MM (VALKYRIE HELM & MIRROR FRACTAL) TỪ GETMM.TXT
-            -- =====================================================================
-            elseif cfg.GetMM and not hasValkyrie then
-                Engine.CurrentObjective = "Valkyrie"
-                Engine.MirrorTeleported = false
-                local indraPatterns = { "rip_indra", "rip_indra True Form" }
-                local iActive, iModel, iRoot, iHum = ScanBossEntity(indraPatterns)
-
-                if iActive and iModel and iRoot and iHum and iHum.Health > 0 then
-                    Engine.CurrentCombatTarget = iModel
-                    lblStatus.Text = string.format("Trạng thái: 🛡️ [VALKYRIE] Khóa mục tiêu rip_indra [HP: %.0f/%.0f]!", iHum.Health, iHum.MaxHealth)
-                    FlyOverTarget(iRoot)
-                    ForceEquipMelee()
-                else
-                    Engine.CurrentCombatTarget = nil
-                    local arrivedCastle = EnsureZoneArrivalBeforeHop("Rip Indra", POS_CASTLE, "Castle on the Sea", indraPatterns)
-                    if arrivedCastle and VerifyBossAbsent(indraPatterns) then
-                        lblStatus.Text = "Trạng thái: 🛡️ [VALKYRIE] Đã kiểm tra Sea Castle -> Hop RealKid + NightAPI (Rip Indra)... " .. timeDisplay
-                        DispatchRealKidHop("Rip Indra", true)
-                    end
-                end
-
-            elseif cfg.GetMM and not hasFractal then
-                Engine.CurrentObjective = "DoughKing"
-                local doughPatterns = { "Dough King" }
-                local dActive, dModel, dRoot, dHum = ScanBossEntity(doughPatterns)
-
-                if dActive and dModel and dRoot and dHum and dHum.Health > 0 then
-                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        local distToLoaf = (hrp.Position - POS_LOAF).Magnitude
-                        if distToLoaf > 500 and not Engine.MirrorTeleported then
-                            lblStatus.Text = string.format("Trạng thái: 🍩 Phát hiện Dough King! Bay tới Cake Loaf (Cách: %.0f)...", distToLoaf)
-                            TweenToPosition(POS_LOAF, CONFIG.TweenSpeed)
-                        elseif not Engine.MirrorTeleported then
-                            ExecuteLoafMirrorSequence()
-                        else
-                            Engine.CurrentCombatTarget = dModel
-                            lblStatus.Text = string.format("Trạng thái: 🍩 Khóa mục tiêu Dough King [HP: %.0f/%.0f]!", dHum.Health, dHum.MaxHealth)
-                            FlyOverTarget(dRoot)
-                            ForceEquipMelee()
-                        end
+if longmaAct then
+    if isInWs and longmaRoot and longmaHum and longmaHum.Health > 0 then
+        Engine.CurrentCombatTarget = longmaModel
+        lblStatus.Text = string.format("Trạng thái: 🐲 [TUSHITA - CỬA MỞ] Đang diệt Longma [%.0f/%.0f HP]...", longmaHum.Health, longmaHum.MaxHealth)
+        FlyOverTarget(longmaRoot)
+        ForceEquipMelee()
+    else
+        Engine.CurrentCombatTarget = nil
+        lblStatus.Text = "Trạng thái: 🐲 [TUSHITA - CỬA MỞ] Longma trong Server -> Bay tới hang Longma để load Boss..."
+        TweenToPosition(POS_LONGMA_CAVE, CONFIG.TweenSpeed, nil, nil, true)
+    end
+end
                     end
                 else
                     Engine.CurrentCombatTarget = nil
@@ -5816,7 +5576,6 @@ task.spawn(function()
                 end
                 if not it.ValkyrieHelm then
                     State.CurrentTask = "👑 [STT 1 - GetMM] Đang làm nhiệm vụ lấy Valkyrie Helm (Rip_Indra)..."
-                UpdateStatus("👑 [STT 1 - GetMM] Đang làm nhiệm vụ lấy Valkyrie Helm (Rip_Indra)...", false)
                     if typeof(HandleGetValkyrieHelm) == "function" then
                         HandleGetValkyrieHelm()
                     end
@@ -5892,20 +5651,5 @@ task.spawn(function()
             State.CurrentTask = "✅ Đã hoàn thành toàn bộ các mục được bật trong AutoConfig!"
         end)
         task.wait(0.5)
-    end
-end)
-
--- [DAEMON]: Tự động kích hoạt đánh Elite khi đang ở Parallel Tushita & Yama
-task.spawn(function()
-    while Engine.IsRunning do
-        pcall(function()
-            if CheckIsSea3() and (not State.Items.Yama or GetEliteKills() < 30) and not Engine.IsHopping then
-                local elite = scanForElite()
-                if elite and not Engine.CurrentCombatTarget then
-                    HuntEliteBoss()
-                end
-            end
-        end)
-        task.wait(1.5)
     end
 end)

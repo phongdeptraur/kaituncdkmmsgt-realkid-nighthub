@@ -196,6 +196,7 @@ local PORTAL_NETWORK = {
 }
 
 local NIGHT_API_ENDPOINTS = {
+    ["Darkbeard"]    = { "Darkbeard", "DarkBeard", "darkbeard", "Blackbeard", "Dark_Beard" },
     ["Rip Indra"]    = { "RipIndra", "Indra", "rip_indra" },
     ["Dough King"]   = { "DoughKing", "Dough_King" },
     ["Cake Prince"]  = { "CakePrince", "Cake_Prince", "Katakuri" },
@@ -1251,14 +1252,16 @@ local function FetchNightApiServers(bossName)
                             local jId = entry.JobId or entry.job_id
                             local rawJobId = DecryptJobId(jId) or jId
                             if rawJobId then
+                                local expectedSea = (bossName == "Darkbeard") and 2 or 3
+                                local defaultPlaceId = (expectedSea == 2) and CONFIG.Sea2PlaceId or CONFIG.Sea3PlaceId
                                 local jobStr = tostring(rawJobId)
                                 local pCount = tonumber(entry.Players or entry.players or entry.count) or 0
-                                local seaNum = tonumber(entry.Sea or entry.sea) or 3
-                                if not Engine:IsVisited(jobStr) and pCount <= CONFIG.MaxHopPlayers and seaNum == 3 then
+                                local seaNum = tonumber(entry.Sea or entry.sea) or expectedSea
+                                if not Engine:IsVisited(jobStr) and pCount <= CONFIG.MaxHopPlayers and seaNum == expectedSea then
                                     table.insert(validServers, {
                                         JobId   = jobStr,
                                         Players = pCount,
-                                        PlaceId = entry.PlaceId or entry.placeId or game.PlaceId
+                                        PlaceId = entry.PlaceId or entry.placeId or defaultPlaceId
                                     })
                                 end
                             end
@@ -2638,10 +2641,34 @@ local function HandleAutoSkullGuitarWorkflow()
 
     -- 5. Đủ 3 nguyên liệu -> Check Full Moon & Lấy SGT
     if IsFullMoonNow() then
+        State.WasDoingSGTFullMoon = true
         State.CurrentTask = "🌕 [SGT - Sea 3] Đã có Full Moon & đủ 3 nguyên liệu! Bật RealKid [AutoSkullGuitar: true]..."
+        if Engine.StatusLabel then
+            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+        end
         StartRealKidWithMode("AutoSGT")
     else
-        State.CurrentTask = "🌑 [SGT - Sea 3] Đã đủ 3 nguyên liệu nhưng chưa có Full Moon -> Chạy RealKidHop [Destination: Full Moon]..."
+        -- Nếu trước đó đang chạy AutoSGT trong Full Moon mà bị hết Full Moon giữa chừng:
+        if State.WasDoingSGTFullMoon or Engine.RealKidMainRunning then
+            State.WasDoingSGTFullMoon = false
+            Engine.RealKidMainRunning = false
+            LastRealKidConfigJson = nil
+            -- Ghi đè tắt AutoSkullGuitar trong file save của RealKidMain để tránh xung đột
+            WriteRealKidMainConfig({
+                AutoFarmMaterialSkullGuitar = false,
+                AutoSkullGuitar             = false,
+            })
+            -- Mở khóa RealKidHop để cho phép khởi chạy lại ngay trong server hiện tại
+            RealKidHopState.IsLaunching = false
+            RealKidHopState.LaunchedInServer = false
+            getgenv()._RealKidHopLaunchedJob = nil
+            Engine.CurrentRealKidDest = nil
+        end
+
+        State.CurrentTask = "🌑 [SGT - Sea 3] Hết/Chưa có Full Moon -> Bật RealKidHop [Destination: Full Moon]..."
+        if Engine.StatusLabel then
+            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+        end
         StartRealKidHop("Full Moon")
     end
 end

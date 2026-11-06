@@ -1491,6 +1491,9 @@ local function DispatchRealKidHop(destination, useNightApiTogether)
     if Engine.CurrentRealKidDest ~= destination then
         WriteRealKidHopConfig(destination, allowPortal)
         Engine.CurrentRealKidDest = destination
+        -- Reset cờ để kích hoạt ngay RealKidHop cho mục tiêu mới
+        RealKidHopState.LaunchedInServer = false
+        getgenv()._RealKidHopLaunchedJob = nil
     end
 
     -- Khi bật RealKidHop vào cái nào thì xài API Night Hub hop chung với RealKidHop
@@ -1498,8 +1501,9 @@ local function DispatchRealKidHop(destination, useNightApiTogether)
         JoinAllNightApiServers(destination)
     end
 
-    -- Khóa cứng: Chỉ chạy RealKidHop đúng 1 lần duy nhất trong server hiện tại
-    if RealKidHopState.IsLaunching or RealKidHopState.LaunchedInServer or getgenv()._RealKidHopLaunchedJob == tostring(game.JobId) then
+    -- [FIX REALKID MAIN + REALKID HOP]: RealKid Main và RealKid Hop là 2 script riêng biệt,
+    -- chạy chồng lên nhau thoải mái, tuyệt đối không bị chặn khi RealKid Main đang chạy!
+    if RealKidHopState.IsLaunching then
         return false
     end
 
@@ -1508,7 +1512,7 @@ local function DispatchRealKidHop(destination, useNightApiTogether)
     getgenv()._RealKidHopLaunchedJob = tostring(game.JobId)
     Engine.RealKidHopRunning = true
 
-    -- [UNLOAD AXIOM PHYSICS]: Nhường toàn bộ kiểm soát cho RealKidHop
+    -- [UNLOAD AXIOM PHYSICS]: Nhường kiểm soát di chuyển cho RealKidHop (không tắt RealKidMain)
     Engine.NoClipActive = false
     if Engine.CurrentTween then
         pcall(function() Engine.CurrentTween:Cancel() end)
@@ -2319,6 +2323,10 @@ local function StartRealKidWithMode(mode)
 end
 
 local function StartRealKidHop(dest)
+    -- Cho phép RealKid Hop khởi chạy tự do ngay cả khi RealKid Main đang chạy
+    RealKidHopState.IsLaunching = false
+    RealKidHopState.LaunchedInServer = false
+    getgenv()._RealKidHopLaunchedJob = nil
     if typeof(DispatchRealKidHop) == "function" then
         DispatchRealKidHop(dest, true)
     end
@@ -2428,7 +2436,7 @@ local function HandleAutoSkullGuitarWorkflow()
         return
     end
 
--- 2. Dark Fragment (cần 1) tại Sea 2
+    -- 2. Dark Fragment (cần 1) tại Sea 2
     if darkFrag < 1 then
         State.NeedRemainInSea2 = true
         if not isSea2 then
@@ -2577,7 +2585,6 @@ local function HandleAutoSkullGuitarWorkflow()
 
                                 if nowBossPos then
                                     local nowTargetAbove = nowBossPos + Vector3.new(0, hoverY, 0)
-                                    -- Nếu đã bay sát đầu Boss hoặc Boss nhảy sang vị trí mới cách điểm cũ > 20 studs -> Ngắt để khóa theo vị trí mới
                                     if (curHrp.Position - nowTargetAbove).Magnitude <= 20 or (nowTargetAbove - startGoal).Magnitude > 20 then
                                         pcall(function() tw:Cancel() end)
                                         break
@@ -2619,27 +2626,18 @@ local function HandleAutoSkullGuitarWorkflow()
         return
     end
 
-    -- 3. Đã đủ Ectoplasm & Dark Fragment -> Sang Sea 3
-    State.NeedRemainInSea2 = false
-    if isSea2 then
-        State.CurrentTask = "✅ Đã đủ 250 Ectoplasm & 1 Dark Fragment! Đang Teleport về Sea 3..."
-        TeleportToSea3()
-        return
-    end
-
-    if not isSea3 then
-        TeleportToSea3()
-        return
-    end
-
-    -- 4. Bones (cần 500) tại Sea 3
+    -- 3. Bones (cần 500): Đủ 2 món Ecto & DarkFrag ở Sea 2 thì VẪN BẬT REALKID MAIN NHƯ THƯỜNG, KHÔNG TP SEA 3!
     if bones < 500 then
         State.FarmingBonesWithRealKid = true
         pcall(function() Engine:UpdateBonesSession(true) end)
+        local curSeaLabel = isSea2 and "Sea 2" or "Sea 3"
         State.CurrentTask = string.format(
-            "🦴 [SGT - Sea 3] Đang farm Bones (%d/500) với RealKid [Né clone 5/60s]...",
-            bones
+            "🦴 [SGT - %s] Đã đủ Ecto (%d/250) & DarkFrag (%d/1) -> Bật RealKid Main farm Bones (%d/500)...",
+            curSeaLabel, ecto, darkFrag, bones
         )
+        if Engine.StatusLabel then
+            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+        end
         StartRealKidWithMode("FarmMatSGT")
         return
     elseif State.FarmingBonesWithRealKid then
@@ -2650,7 +2648,23 @@ local function HandleAutoSkullGuitarWorkflow()
         return
     end
 
-    -- 5. Đủ 3 nguyên liệu -> Check Full Moon & Lấy SGT
+    -- 4. CHỈ TP SEA 3 KHI ĐÃ ĐỦ CẢ 3 ITEM: 250 Ectoplasm, 1 Dark Fragment, 500 Bones!
+    State.NeedRemainInSea2 = false
+    if isSea2 then
+        State.CurrentTask = "✅ [SGT] Đã đủ cả 3 items (250 Ecto, 1 DarkFrag, 500 Bones)! Đang Teleport sang Sea 3..."
+        if Engine.StatusLabel then
+            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+        end
+        TeleportToSea3()
+        return
+    end
+
+    if not isSea3 then
+        TeleportToSea3()
+        return
+    end
+
+    -- 5. Đã ở Sea 3 và đủ 3 nguyên liệu -> Check Full Moon & Lấy SGT
     if IsFullMoonNow() then
         State.WasDoingSGTFullMoon = true
         State.CurrentTask = "🌕 [SGT - Sea 3] Đã có Full Moon & đủ 3 nguyên liệu! Bật RealKid [AutoSkullGuitar: true]..."
@@ -2659,23 +2673,7 @@ local function HandleAutoSkullGuitarWorkflow()
         end
         StartRealKidWithMode("AutoSGT")
     else
-        -- Nếu trước đó đang chạy AutoSGT trong Full Moon mà bị hết Full Moon giữa chừng:
-        if State.WasDoingSGTFullMoon or Engine.RealKidMainRunning then
-            State.WasDoingSGTFullMoon = false
-            Engine.RealKidMainRunning = false
-            LastRealKidConfigJson = nil
-            -- Ghi đè tắt AutoSkullGuitar trong file save của RealKidMain để tránh xung đột
-            WriteRealKidMainConfig({
-                AutoFarmMaterialSkullGuitar = false,
-                AutoSkullGuitar             = false,
-            })
-            -- Mở khóa RealKidHop để cho phép khởi chạy lại ngay trong server hiện tại
-            RealKidHopState.IsLaunching = false
-            RealKidHopState.LaunchedInServer = false
-            getgenv()._RealKidHopLaunchedJob = nil
-            Engine.CurrentRealKidDest = nil
-        end
-
+        -- RealKid Main và RealKid Hop chạy chồng lên nhau thoải mái, không cần ngắt RealKid Main
         State.CurrentTask = "🌑 [SGT - Sea 3] Hết/Chưa có Full Moon -> Bật RealKidHop [Destination: Full Moon]..."
         if Engine.StatusLabel then
             Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
@@ -2963,7 +2961,7 @@ local function EnsurePreTweenBeforeIndraHop(bossPatterns)
                 Engine.StatusLabel.Text = string.format("Trạng thái: ✈️ [PRE-TWEEN] Đang bay đến (5325.75, 1004.77, 275.70) trước khi Hop Indra (Cách: %.0f)...", dist)
             end
 
-            TweenToPosition(POS_PRE_HOP_INDRA, CONFIG.TweenSpeed, bossPatterns)
+            TweenToPosition(POS_PRE_HOP_INDRA, CONFIG.TweenSpeed, bossPatterns, nil, true)
 
             local postHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if postHrp and (postHrp.Position - POS_PRE_HOP_INDRA).Magnitude <= 50 then
@@ -3006,7 +3004,7 @@ local function EnsureZoneArrivalBeforeHop(bossName, targetPos, zoneLabel, bossPa
                 Engine.StatusLabel.Text = string.format("Trạng thái: ✈️ Đang tween đến %s trước khi Hop (Cách: %.0f)...", zoneLabel, dist)
             end
 
-            TweenToPosition(targetPos, CONFIG.TweenSpeed, bossPatterns)
+            TweenToPosition(targetPos, CONFIG.TweenSpeed, bossPatterns, nil, true)
 
             local postHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if postHrp and (postHrp.Position - targetPos).Magnitude <= CONFIG.ArrivalRadius then

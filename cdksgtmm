@@ -2297,6 +2297,7 @@ end
 -- CÁC HÀM PHỤ TRỢ CHO SKULL GUITAR & HỆ THỐNG REALKID
 -- ==============================================================================
 local SGT_DARKBEARD_PRE_POS = CFrame.new(999.08, 429.45, -5161.50)
+local POS_DARKBEARD_ARENA   = Vector3.new(3777.58, 62.00, -3498.82)
 
 local function StartRealKidWithMode(mode)
     if typeof(SaveRealKidConfig) == "function" then
@@ -2422,10 +2423,11 @@ local function HandleAutoSkullGuitarWorkflow()
             return
         end
 
-        -- [FIX TWEEN]: Tắt triệt để cờ RealKid trước khi Tween để nhường toàn quyền cho Axiom
+        -- Giải phóng quyền điều khiển hoàn toàn cho Axiom (không dùng RealKidMain)
         Engine.RealKidMainRunning = false
         Engine.RealKidHopRunning = false
         Engine.NoClipActive = true
+        Engine.FastAttackActive = true
 
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -2435,6 +2437,60 @@ local function HandleAutoSkullGuitarWorkflow()
         if hum then hum.Sit = false end
         hrp.Anchored = false
 
+        -- Kiểm tra trực tiếp xem Darkbeard có trong server không
+        local dbAct = ScanCrossContinentalBoss({ "Darkbeard" })
+        if dbAct or IsDarkbeardSpawned() then
+            -- Vòng lặp khóa mục tiêu và tiêu diệt Darkbeard liên tục (0.1s/nhịp)
+            while Engine.IsRunning and State.Running and CheckIsSea2() do
+                local act, hp, maxHp, isInWs, dbModel, dbRoot, dbHum = ScanCrossContinentalBoss({ "Darkbeard" })
+                if not act and not IsDarkbeardSpawned() then
+                    Engine.CurrentCombatTarget = nil
+                    SyncItemsPreTeamAndInGame()
+                    break
+                end
+
+                Engine.RealKidMainRunning = false
+                Engine.RealKidHopRunning = false
+                Engine.NoClipActive = true
+                Engine.FastAttackActive = true
+
+                if isInWs and dbModel and dbRoot and dbHum and dbHum.Health > 0 then
+                    -- Boss đã load trong Workspace -> Khóa mục tiêu, bật Haki, cầm Melee và bay trên đầu Boss để đánh
+                    Engine.CurrentCombatTarget = dbModel
+                    State.CurrentTask = string.format(
+                        "⚔️ [SGT - Sea 2] Đang tiêu diệt Darkbeard [HP: %.0f/%.0f]...",
+                        dbHum.Health,
+                        dbHum.MaxHealth
+                    )
+                    if Engine.StatusLabel then
+                        Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+                    end
+                    FlyOverTarget(dbRoot)
+                    ForceEquipMelee()
+                else
+                    -- Boss đang nằm trong ReplicatedStorage (chưa stream vào Workspace do ở xa) -> Tween tới Dark Arena
+                    Engine.CurrentCombatTarget = nil
+                    local targetArenaPos = (dbRoot and dbRoot.Position) or POS_DARKBEARD_ARENA
+                    local curHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    local dist = curHrp and (curHrp.Position - targetArenaPos).Magnitude or 0
+
+                    State.CurrentTask = string.format(
+                        "🛸 [SGT - Sea 2] Phát hiện Darkbeard! Đang Tween tới Dark Arena để load Boss (%.0f studs)...",
+                        dist
+                    )
+                    if Engine.StatusLabel then
+                        Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+                    end
+                    TweenToPosition(targetArenaPos, CONFIG.TweenSpeed, nil, false, true)
+                end
+
+                task.wait(0.1)
+            end
+            return
+        end
+
+        -- Nếu KHÔNG có Darkbeard trong server -> Pre-Tween tới điểm chờ rồi mới chạy RealKidHop
+        Engine.CurrentCombatTarget = nil
         if not State.DarkbeardPreTweenDone then
             local distToPrePos = (hrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude
             if distToPrePos > 25 then
@@ -2442,7 +2498,8 @@ local function HandleAutoSkullGuitarWorkflow()
                 if Engine.StatusLabel then
                     Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
                 end
-                local ok = TweenTo(SGT_DARKBEARD_PRE_POS, true)
+                -- Truyền {"Darkbeard"} vào abortBossPatterns để tự ngắt Pre-Tween ngay nếu Boss xuất hiện giữa chừng
+                local ok = TweenToPosition(SGT_DARKBEARD_PRE_POS.Position, CONFIG.TweenSpeed, { "Darkbeard" }, false, true)
                 local curHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if ok or (curHrp and (curHrp.Position - SGT_DARKBEARD_PRE_POS.Position).Magnitude <= 25) then
                     State.DarkbeardPreTweenDone = true
@@ -2453,13 +2510,8 @@ local function HandleAutoSkullGuitarWorkflow()
             end
         end
 
-        if IsDarkbeardSpawned() then
-            State.CurrentTask = "⚔️ [SGT - Sea 2] Phát hiện Boss Darkbeard! Bật RealKid [AutoFarmMaterialSkullGuitar]..."
-            StartRealKidWithMode("FarmMatSGT")
-        else
-            State.CurrentTask = "🔍 [SGT - Sea 2] Không có Darkbeard -> Chạy RealKidHop [Destination: Darkbeard]..."
-            StartRealKidHop("Darkbeard")
-        end
+        State.CurrentTask = "🔍 [SGT - Sea 2] Không có Darkbeard -> Chạy RealKidHop [Destination: Darkbeard]..."
+        StartRealKidHop("Darkbeard")
         return
     end
 
@@ -2960,7 +3012,8 @@ local magnetConn = RunService.Stepped:Connect(function()
     if Engine.CurrentCombatTarget and Engine.CurrentCombatTarget.Parent then
         local tName = Engine.CurrentCombatTarget.Name:lower()
         if tName:find("dough king") or tName:find("indra") or tName:find("longma")
-            or tName:find("diablo") or tName:find("deandre") or tName:find("urban") then
+            or tName:find("diablo") or tName:find("deandre") or tName:find("urban")
+            or tName:find("darkbeard") then
             isBossNoBring = true
         end
     end

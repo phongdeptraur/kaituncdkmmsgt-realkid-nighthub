@@ -1491,9 +1491,6 @@ local function DispatchRealKidHop(destination, useNightApiTogether)
     if Engine.CurrentRealKidDest ~= destination then
         WriteRealKidHopConfig(destination, allowPortal)
         Engine.CurrentRealKidDest = destination
-        -- Reset cờ để kích hoạt ngay RealKidHop cho mục tiêu mới
-        RealKidHopState.LaunchedInServer = false
-        getgenv()._RealKidHopLaunchedJob = nil
     end
 
     -- Khi bật RealKidHop vào cái nào thì xài API Night Hub hop chung với RealKidHop
@@ -1501,9 +1498,8 @@ local function DispatchRealKidHop(destination, useNightApiTogether)
         JoinAllNightApiServers(destination)
     end
 
-    -- [FIX REALKID MAIN + REALKID HOP]: RealKid Main và RealKid Hop là 2 script riêng biệt,
-    -- chạy chồng lên nhau thoải mái, tuyệt đối không bị chặn khi RealKid Main đang chạy!
-    if RealKidHopState.IsLaunching then
+    -- Khóa cứng: Chỉ chạy RealKidHop đúng 1 lần duy nhất trong server hiện tại
+    if RealKidHopState.IsLaunching or RealKidHopState.LaunchedInServer or getgenv()._RealKidHopLaunchedJob == tostring(game.JobId) then
         return false
     end
 
@@ -1512,7 +1508,7 @@ local function DispatchRealKidHop(destination, useNightApiTogether)
     getgenv()._RealKidHopLaunchedJob = tostring(game.JobId)
     Engine.RealKidHopRunning = true
 
-    -- [UNLOAD AXIOM PHYSICS]: Nhường kiểm soát di chuyển cho RealKidHop (không tắt RealKidMain)
+    -- [UNLOAD AXIOM PHYSICS]: Nhường toàn bộ kiểm soát cho RealKidHop
     Engine.NoClipActive = false
     if Engine.CurrentTween then
         pcall(function() Engine.CurrentTween:Cancel() end)
@@ -2062,8 +2058,8 @@ ScanCrossContinentalBoss = function(bossPatterns)
 end
 
 local function ScanBossEntity(patterns)
-    local act, _, _, isInWs, child, root, hum = ScanCrossContinentalBoss(patterns)
-    return act, child, root, hum, isInWs
+    local act, _, _, _, child, root, hum = ScanCrossContinentalBoss(patterns)
+    return act, child, root, hum
 end
 
 local CachedTikiBossKilled = nil
@@ -2323,10 +2319,6 @@ local function StartRealKidWithMode(mode)
 end
 
 local function StartRealKidHop(dest)
-    -- Cho phép RealKid Hop khởi chạy tự do ngay cả khi RealKid Main đang chạy
-    RealKidHopState.IsLaunching = false
-    RealKidHopState.LaunchedInServer = false
-    getgenv()._RealKidHopLaunchedJob = nil
     if typeof(DispatchRealKidHop) == "function" then
         DispatchRealKidHop(dest, true)
     end
@@ -2385,17 +2377,6 @@ end
 
 local function IsFullMoonNow()
     local lighting = game:GetService("Lighting")
-    if not lighting then return false end
-
-    -- 1. Kiểm tra trời tối (Ban đêm trong Blox Fruits: từ 18:00 tối đến trước 05:00 sáng)
-    -- Nếu từ 05:00 sáng đến trước 18:00 tối -> Trời sáng -> Coi như CHƯA Full Moon
-    local clockTime = tonumber(lighting.ClockTime) or 12
-    local isNightTime = (clockTime >= 18 or clockTime < 5)
-    if not isNightTime then
-        return false
-    end
-
-    -- 2. Kiểm tra Texture Mặt Trăng phải là Full Moon (9709149431)
     local sky = lighting:FindFirstChildOfClass("Sky")
     if sky and sky.MoonTextureId then
         if tostring(sky.MoonTextureId):find("9709149431") then
@@ -2436,7 +2417,7 @@ local function HandleAutoSkullGuitarWorkflow()
         return
     end
 
-    -- 2. Dark Fragment (cần 1) tại Sea 2
+-- 2. Dark Fragment (cần 1) tại Sea 2
     if darkFrag < 1 then
         State.NeedRemainInSea2 = true
         if not isSea2 then
@@ -2585,6 +2566,7 @@ local function HandleAutoSkullGuitarWorkflow()
 
                                 if nowBossPos then
                                     local nowTargetAbove = nowBossPos + Vector3.new(0, hoverY, 0)
+                                    -- Nếu đã bay sát đầu Boss hoặc Boss nhảy sang vị trí mới cách điểm cũ > 20 studs -> Ngắt để khóa theo vị trí mới
                                     if (curHrp.Position - nowTargetAbove).Magnitude <= 20 or (nowTargetAbove - startGoal).Magnitude > 20 then
                                         pcall(function() tw:Cancel() end)
                                         break
@@ -2626,18 +2608,27 @@ local function HandleAutoSkullGuitarWorkflow()
         return
     end
 
-    -- 3. Bones (cần 500): Đủ 2 món Ecto & DarkFrag ở Sea 2 thì VẪN BẬT REALKID MAIN NHƯ THƯỜNG, KHÔNG TP SEA 3!
+    -- 3. Đã đủ Ectoplasm & Dark Fragment -> Sang Sea 3
+    State.NeedRemainInSea2 = false
+    if isSea2 then
+        State.CurrentTask = "✅ Đã đủ 250 Ectoplasm & 1 Dark Fragment! Đang Teleport về Sea 3..."
+        TeleportToSea3()
+        return
+    end
+
+    if not isSea3 then
+        TeleportToSea3()
+        return
+    end
+
+    -- 4. Bones (cần 500) tại Sea 3
     if bones < 500 then
         State.FarmingBonesWithRealKid = true
         pcall(function() Engine:UpdateBonesSession(true) end)
-        local curSeaLabel = isSea2 and "Sea 2" or "Sea 3"
         State.CurrentTask = string.format(
-            "🦴 [SGT - %s] Đã đủ Ecto (%d/250) & DarkFrag (%d/1) -> Bật RealKid Main farm Bones (%d/500)...",
-            curSeaLabel, ecto, darkFrag, bones
+            "🦴 [SGT - Sea 3] Đang farm Bones (%d/500) với RealKid [Né clone 5/60s]...",
+            bones
         )
-        if Engine.StatusLabel then
-            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
-        end
         StartRealKidWithMode("FarmMatSGT")
         return
     elseif State.FarmingBonesWithRealKid then
@@ -2648,23 +2639,7 @@ local function HandleAutoSkullGuitarWorkflow()
         return
     end
 
-    -- 4. CHỈ TP SEA 3 KHI ĐÃ ĐỦ CẢ 3 ITEM: 250 Ectoplasm, 1 Dark Fragment, 500 Bones!
-    State.NeedRemainInSea2 = false
-    if isSea2 then
-        State.CurrentTask = "✅ [SGT] Đã đủ cả 3 items (250 Ecto, 1 DarkFrag, 500 Bones)! Đang Teleport sang Sea 3..."
-        if Engine.StatusLabel then
-            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
-        end
-        TeleportToSea3()
-        return
-    end
-
-    if not isSea3 then
-        TeleportToSea3()
-        return
-    end
-
-    -- 5. Đã ở Sea 3 và đủ 3 nguyên liệu -> Check Full Moon & Lấy SGT
+    -- 5. Đủ 3 nguyên liệu -> Check Full Moon & Lấy SGT
     if IsFullMoonNow() then
         State.WasDoingSGTFullMoon = true
         State.CurrentTask = "🌕 [SGT - Sea 3] Đã có Full Moon & đủ 3 nguyên liệu! Bật RealKid [AutoSkullGuitar: true]..."
@@ -2673,7 +2648,23 @@ local function HandleAutoSkullGuitarWorkflow()
         end
         StartRealKidWithMode("AutoSGT")
     else
-        -- RealKid Main và RealKid Hop chạy chồng lên nhau thoải mái, không cần ngắt RealKid Main
+        -- Nếu trước đó đang chạy AutoSGT trong Full Moon mà bị hết Full Moon giữa chừng:
+        if State.WasDoingSGTFullMoon or Engine.RealKidMainRunning then
+            State.WasDoingSGTFullMoon = false
+            Engine.RealKidMainRunning = false
+            LastRealKidConfigJson = nil
+            -- Ghi đè tắt AutoSkullGuitar trong file save của RealKidMain để tránh xung đột
+            WriteRealKidMainConfig({
+                AutoFarmMaterialSkullGuitar = false,
+                AutoSkullGuitar             = false,
+            })
+            -- Mở khóa RealKidHop để cho phép khởi chạy lại ngay trong server hiện tại
+            RealKidHopState.IsLaunching = false
+            RealKidHopState.LaunchedInServer = false
+            getgenv()._RealKidHopLaunchedJob = nil
+            Engine.CurrentRealKidDest = nil
+        end
+
         State.CurrentTask = "🌑 [SGT - Sea 3] Hết/Chưa có Full Moon -> Bật RealKidHop [Destination: Full Moon]..."
         if Engine.StatusLabel then
             Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
@@ -2902,18 +2893,14 @@ TweenToPosition = function(targetPos, speed, abortBossPatterns, abortOnIndraApi,
 end
 
 local function FlyOverTarget(targetPart, abortOnIndraApi)
-    -- Khi Axiom đã gọi FlyOverTarget tức là đang chủ động đánh Boss -> Mở khóa vật lý Axiom
-    Engine.RealKidMainRunning = false
-    Engine.RealKidHopRunning = false
-    Engine.NoClipActive = true
-
+    if Engine.RealKidMainRunning or Engine.RealKidHopRunning then return end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp or not targetPart or not targetPart.Parent then return end
 
     local targetCombatPos = targetPart.Position + Vector3.new(0, CONFIG.HoverDistanceY, 0)
     if (hrp.Position - targetCombatPos).Magnitude > 22 then
-        TweenToPosition(targetCombatPos, CONFIG.TweenSpeed, nil, abortOnIndraApi, true)
+        TweenToPosition(targetCombatPos, CONFIG.TweenSpeed, nil, abortOnIndraApi)
     else
         hrp.CFrame = CFrame.lookAt(targetCombatPos, targetPart.Position)
         hrp.AssemblyLinearVelocity = Vector3.zero
@@ -2961,7 +2948,7 @@ local function EnsurePreTweenBeforeIndraHop(bossPatterns)
                 Engine.StatusLabel.Text = string.format("Trạng thái: ✈️ [PRE-TWEEN] Đang bay đến (5325.75, 1004.77, 275.70) trước khi Hop Indra (Cách: %.0f)...", dist)
             end
 
-            TweenToPosition(POS_PRE_HOP_INDRA, CONFIG.TweenSpeed, bossPatterns, nil, true)
+            TweenToPosition(POS_PRE_HOP_INDRA, CONFIG.TweenSpeed, bossPatterns)
 
             local postHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if postHrp and (postHrp.Position - POS_PRE_HOP_INDRA).Magnitude <= 50 then
@@ -3004,7 +2991,7 @@ local function EnsureZoneArrivalBeforeHop(bossName, targetPos, zoneLabel, bossPa
                 Engine.StatusLabel.Text = string.format("Trạng thái: ✈️ Đang tween đến %s trước khi Hop (Cách: %.0f)...", zoneLabel, dist)
             end
 
-            TweenToPosition(targetPos, CONFIG.TweenSpeed, bossPatterns, nil, true)
+            TweenToPosition(targetPos, CONFIG.TweenSpeed, bossPatterns)
 
             local postHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if postHrp and (postHrp.Position - targetPos).Magnitude <= CONFIG.ArrivalRadius then
@@ -3749,7 +3736,7 @@ local function UpdateProgressUI()
     TaskBadges[5].TextColor3 = c5
 
     -- Cập nhật Label trạng thái nếu có
-    if typeof(lblStatus) ~= "nil" and State.CurrentTask and Engine.CurrentObjective == "SkullGuitar" then
+    if typeof(lblStatus) ~= "nil" and State.CurrentTask then
         pcall(function() lblStatus.Text = "Trạng thái: " .. tostring(State.CurrentTask) end)
     end
 end
@@ -4041,17 +4028,10 @@ local function CheckHasYama()
 end
 
 local function IsTushitaGateOpened()
-    if State.RemoteProgress and State.RemoteProgress.TushitaOpenedDoor == true then
-        return true
-    end
     local commF = GetCommF()
     if not commF then return false end
-    local prog = SafeInvokeServer(commF, 1.5, "TushitaProgress")
-    if (type(prog) == "table" and prog.OpenedDoor == true) or prog == true then
-        if State.RemoteProgress then State.RemoteProgress.TushitaOpenedDoor = true end
-        return true
-    end
-    return false
+    local prog = SafeInvokeServer(commF, 1.0, "TushitaProgress")
+    return type(prog) == "table" and prog.OpenedDoor == true
 end
 
 local function HasHolyTorch()
@@ -4619,20 +4599,154 @@ task.spawn(function()
 
                 if gateOpened then
                     -- [OPENED = TRUE]: Đã bỏ Holy Torch rồi -> Chỉ cần kill Longma, nếu server ko có Longma thì Hop Low để tìm Longma
-                    local longmaAct, _, _, isInWs, longmaModel, longmaRoot, longmaHum = ScanCrossContinentalBoss({ "Longma" })
+                    local longmaAct, _, _, _, longmaModel, longmaRoot, longmaHum = ScanCrossContinentalBoss({ "Longma" })
 
-if longmaAct then
-    if isInWs and longmaRoot and longmaHum and longmaHum.Health > 0 then
-        Engine.CurrentCombatTarget = longmaModel
-        lblStatus.Text = string.format("Trạng thái: 🐲 [TUSHITA - CỬA MỞ] Đang diệt Longma [%.0f/%.0f HP]...", longmaHum.Health, longmaHum.MaxHealth)
-        FlyOverTarget(longmaRoot)
-        ForceEquipMelee()
-    else
-        Engine.CurrentCombatTarget = nil
-        lblStatus.Text = "Trạng thái: 🐲 [TUSHITA - CỬA MỞ] Longma trong Server -> Bay tới hang Longma để load Boss..."
-        TweenToPosition(POS_LONGMA_CAVE, CONFIG.TweenSpeed, nil, nil, true)
-    end
-end
+                    if longmaAct then
+                        if longmaRoot and longmaHum and longmaHum.Health > 0 then
+                            Engine.CurrentCombatTarget = longmaModel
+                            lblStatus.Text = string.format("Trạng thái: 🐲 [TUSHITA - CỬA MỞ] Đang diệt Longma [%.0f/%.0f HP]...", longmaHum.Health, longmaHum.MaxHealth)
+                            FlyOverTarget(longmaRoot)
+                            ForceEquipMelee()
+                        else
+                            Engine.CurrentCombatTarget = nil
+                            lblStatus.Text = "Trạng thái: 🐲 [TUSHITA - CỬA MỞ] Longma trong Server -> Bay tới hang Longma..."
+                            TweenToPosition(POS_LONGMA_CAVE, CONFIG.TweenSpeed)
+                        end
+                    else
+                        Engine.CurrentCombatTarget = nil
+                        lblStatus.Text = "Trạng thái: 🌐 [TUSHITA - CỬA MỞ] Không có Longma -> Hop Low Server tìm Longma... " .. timeDisplay
+                        Engine:HopLowServer()
+                    end
+                else
+                    -- [OPENED = FALSE]: Chưa bỏ Holy Torch -> Cần lấy Holy Torch đốt 5 đuốc hoặc Hop Indra (NightAPI + RealKidHop)
+                    Engine.CurrentCombatTarget = nil
+                    if HasHolyTorch() then
+                        lblStatus.Text = "Trạng thái: 🔥 ĐÃ CÓ HOLY TORCH! Đang đốt 5 đuốc mở cổng Tushita..."
+                        local commF = GetCommF()
+                        if commF then
+                            for torchId = 1, 5 do
+                                pcall(function() commF:InvokeServer("TushitaProgress", "Torch", torchId) end)
+                                task.wait(0.2)
+                            end
+                        end
+                    else
+                        local indraAct = CachedRadarData.IndraExists or ScanBossEntity({ "rip_indra True Form", "rip_indra" })
+                        if indraAct then
+                            while Engine.IsRunning and not HasHolyTorch() and not Engine.IsHopping do
+                                lblStatus.Text = "Trạng thái: 🔥 [TUSHITA] Có Rip Indra! Tween tới Waterfall lấy Holy Torch..."
+                                TweenToPosition(POS_HOLY_TORCH_TOWER, CONFIG.TweenSpeed)
+
+                                local currentChar = LocalPlayer.Character
+                                local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
+                                if currentHrp then
+                                    currentHrp.CFrame = CFrame.new(POS_HOLY_TORCH_TOWER)
+                                    Engine.NoClipActive = false
+                                    currentHrp.Anchored = false
+                                    currentHrp.AssemblyLinearVelocity = Vector3.zero
+                                    local s1 = currentHrp:FindFirstChild("__AxiomFlightStabilizer")
+                                    if s1 then s1:Destroy() end
+                                    for _, part in ipairs(currentChar:GetDescendants()) do
+                                        if part:IsA("BasePart") then part.CanCollide = true; part.CanTouch = true end
+                                    end
+                                    task.wait(1.0)
+                                    Engine.NoClipActive = true
+                                end
+                                if HasHolyTorch() or not ScanBossEntity({ "rip_indra True Form", "rip_indra" }) then break end
+                            end
+                        else
+                            -- Nếu đã đủ điều kiện 30/30 Elite Yama hoặc đã có sẵn Yama trước khi get Tushita:
+                            -- Bắt buộc Pre-Tween đến điểm (5325.75, 1004.77, 275.70) trước khi Hop Indra (NightAPI + RealKidHop)
+                            if hasYama or Engine.EliteKills >= 30 then
+                                local indraPatterns = { "rip_indra", "rip_indra True Form" }
+                                local arrivedPrePoint = EnsurePreTweenBeforeIndraHop(indraPatterns)
+                                if arrivedPrePoint and VerifyBossAbsent(indraPatterns) then
+                                    lblStatus.Text = "Trạng thái: 🌐 [TUSHITA - PRETWEEN XONG] Bật RealKidHop + NightAPI (Rip Indra)... " .. timeDisplay
+                                    DispatchRealKidHop("Rip Indra", true)
+                                end
+                            else
+                                -- Chưa có Yama và Elite < 30: Chạy song song tìm Indra (NightAPI + RealKidHop) kết hợp săn Elite
+                                DispatchRealKidHop("Rip Indra", false)
+
+                                local indraNightServers = GetValidNightServers("Rip Indra")
+                                if #indraNightServers > 0 then
+                                    Engine.CurrentCombatTarget = nil
+                                    if Engine.CurrentTween then
+                                        pcall(function() Engine.CurrentTween:Cancel() end)
+                                        Engine.CurrentTween = nil
+                                    end
+                                    lblStatus.Text = string.format("Trạng thái: 🚨 [NIGHT API] Phát hiện %d server Rip Indra! Dừng Elite -> Join Indra ngay!", #indraNightServers)
+                                    JoinAllNightApiServers("Rip Indra")
+                                else
+                                    local eliteTarget = CachedRadarData.EliteTarget or scanForElite()
+                                    if eliteTarget and eliteTarget.Instance and eliteTarget.Root then
+                                        pcall(function()
+                                            local commF = GetCommF()
+                                            if commF then commF:InvokeServer("EliteHunter") end
+                                        end)
+
+                                        Engine.CurrentCombatTarget = eliteTarget.Instance
+                                        lblStatus.Text = string.format("Trạng thái: 👹 [PARALLEL YAMA+TUSHITA] Đang diệt Elite %s [HP: %.0f | %d/30] & Canh API Indra...", eliteTarget.ExactName, eliteTarget.Health, Engine.EliteKills)
+                                        FlyOverTarget(eliteTarget.Root, true)
+                                        ForceEquipMelee()
+                                    else
+                                        Engine.CurrentCombatTarget = nil
+                                        local eliteNightServers = GetValidNightServers("Elite Hunter")
+                                        if #eliteNightServers > 0 then
+                                            lblStatus.Text = string.format("Trạng thái: 🌐 [PARALLEL YAMA+TUSHITA] Ko có Indra -> Hop NightAPI Elite (%d sv) [Elite: %d/30]...", #eliteNightServers, Engine.EliteKills)
+                                            JoinAllNightApiServers("Elite Hunter")
+                                        else
+                                            lblStatus.Text = string.format("Trạng thái: 🔍 [PARALLEL YAMA+TUSHITA] Đang chờ NightAPI Indra/Elite & RealKidHop Indra [Elite: %d/30]... %s", Engine.EliteKills, timeDisplay)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+            -- =====================================================================
+            -- 2. CƠ CHẾ GET MM (VALKYRIE HELM & MIRROR FRACTAL) TỪ GETMM.TXT
+            -- =====================================================================
+            elseif cfg.GetMM and not hasValkyrie then
+                Engine.CurrentObjective = "Valkyrie"
+                Engine.MirrorTeleported = false
+                local indraPatterns = { "rip_indra", "rip_indra True Form" }
+                local iActive, iModel, iRoot, iHum = ScanBossEntity(indraPatterns)
+
+                if iActive and iModel and iRoot and iHum and iHum.Health > 0 then
+                    Engine.CurrentCombatTarget = iModel
+                    lblStatus.Text = string.format("Trạng thái: 🛡️ [VALKYRIE] Khóa mục tiêu rip_indra [HP: %.0f/%.0f]!", iHum.Health, iHum.MaxHealth)
+                    FlyOverTarget(iRoot)
+                    ForceEquipMelee()
+                else
+                    Engine.CurrentCombatTarget = nil
+                    local arrivedCastle = EnsureZoneArrivalBeforeHop("Rip Indra", POS_CASTLE, "Castle on the Sea", indraPatterns)
+                    if arrivedCastle and VerifyBossAbsent(indraPatterns) then
+                        lblStatus.Text = "Trạng thái: 🛡️ [VALKYRIE] Đã kiểm tra Sea Castle -> Hop RealKid + NightAPI (Rip Indra)... " .. timeDisplay
+                        DispatchRealKidHop("Rip Indra", true)
+                    end
+                end
+
+            elseif cfg.GetMM and not hasFractal then
+                Engine.CurrentObjective = "DoughKing"
+                local doughPatterns = { "Dough King" }
+                local dActive, dModel, dRoot, dHum = ScanBossEntity(doughPatterns)
+
+                if dActive and dModel and dRoot and dHum and dHum.Health > 0 then
+                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local distToLoaf = (hrp.Position - POS_LOAF).Magnitude
+                        if distToLoaf > 500 and not Engine.MirrorTeleported then
+                            lblStatus.Text = string.format("Trạng thái: 🍩 Phát hiện Dough King! Bay tới Cake Loaf (Cách: %.0f)...", distToLoaf)
+                            TweenToPosition(POS_LOAF, CONFIG.TweenSpeed)
+                        elseif not Engine.MirrorTeleported then
+                            ExecuteLoafMirrorSequence()
+                        else
+                            Engine.CurrentCombatTarget = dModel
+                            lblStatus.Text = string.format("Trạng thái: 🍩 Khóa mục tiêu Dough King [HP: %.0f/%.0f]!", dHum.Health, dHum.MaxHealth)
+                            FlyOverTarget(dRoot)
+                            ForceEquipMelee()
+                        end
                     end
                 else
                     Engine.CurrentCombatTarget = nil

@@ -2835,11 +2835,14 @@ end
 
 TweenToPosition = function(targetPos, speed, abortBossPatterns, abortOnIndraApi, forceAxiom)
     if not Engine.IsRunning then return false end
-    if (Engine.RealKidMainRunning or Engine.RealKidHopRunning) and not forceAxiom then return false end
-    if forceAxiom then
+    -- [AXIOM FIX]: Tự động mở khóa nếu có mục tiêu combat hoặc đang chạy nhiệm vụ Parallel
+    local isParallelActive = (State.CurrentTask and string.find(State.CurrentTask, "PARALLEL")) ~= nil
+    if forceAxiom or Engine.CurrentCombatTarget ~= nil or isParallelActive then
         Engine.RealKidMainRunning = false
         Engine.RealKidHopRunning = false
         Engine.NoClipActive = true
+    elseif (Engine.RealKidMainRunning or Engine.RealKidHopRunning) then
+        return false
     end
     Engine.CurrentTweenToken = (Engine.CurrentTweenToken or 0) + 1
     local token = Engine.CurrentTweenToken
@@ -2893,14 +2896,29 @@ TweenToPosition = function(targetPos, speed, abortBossPatterns, abortOnIndraApi,
 end
 
 local function FlyOverTarget(targetPart, abortOnIndraApi)
-    if Engine.RealKidMainRunning or Engine.RealKidHopRunning then return end
+    -- [AXIOM FIX]: Giải phóng quyền điều khiển cho Axiom để không bị RealKid làm đứng yên
+    Engine.RealKidMainRunning = false
+    Engine.RealKidHopRunning = false
+    Engine.NoClipActive = true
+    Engine.FastAttackActive = true
+
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not targetPart or not targetPart.Parent then return end
+
+    if hum and hum.Sit then hum.Sit = false end
+    hrp.Anchored = false
+
+    local stabilizer = hrp:FindFirstChild("__AxiomFlightStabilizer") or Instance.new("BodyVelocity")
+    stabilizer.Name = "__AxiomFlightStabilizer"
+    stabilizer.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+    stabilizer.Velocity = Vector3.zero
+    stabilizer.Parent = hrp
 
     local targetCombatPos = targetPart.Position + Vector3.new(0, CONFIG.HoverDistanceY, 0)
     if (hrp.Position - targetCombatPos).Magnitude > 22 then
-        TweenToPosition(targetCombatPos, CONFIG.TweenSpeed, nil, abortOnIndraApi)
+        TweenToPosition(targetCombatPos, CONFIG.TweenSpeed, nil, abortOnIndraApi, true)
     else
         hrp.CFrame = CFrame.lookAt(targetCombatPos, targetPart.Position)
         hrp.AssemblyLinearVelocity = Vector3.zero
@@ -3735,9 +3753,16 @@ local function UpdateProgressUI()
     )
     TaskBadges[5].TextColor3 = c5
 
-    -- Cập nhật Label trạng thái nếu có
+    -- Cập nhật Label trạng thái nếu có (Đồng bộ chống giật chữ)
     if typeof(lblStatus) ~= "nil" and State.CurrentTask then
-        pcall(function() lblStatus.Text = "Trạng thái: " .. tostring(State.CurrentTask) end)
+        pcall(function()
+            local taskText = tostring(State.CurrentTask)
+            if string.sub(taskText, 1, 12) == "Trạng thái: " then
+                lblStatus.Text = taskText
+            else
+                lblStatus.Text = "Trạng thái: " .. taskText
+            end
+        end)
     end
 end
 
@@ -5711,7 +5736,9 @@ task.spawn(function()
                     return
                 end
                 if not it.Tushita then
-                    State.CurrentTask = "⚔️ [STT 3 - GetCDK] Đang làm nhiệm vụ lấy kiếm Tushita..."
+                    if not (State.CurrentTask and string.find(State.CurrentTask, "PARALLEL")) then
+        State.CurrentTask = "⚔️ [STT 3 - GetCDK] Đang làm nhiệm vụ lấy kiếm Tushita..."
+    end
                     if typeof(HandleGetTushita) == "function" then
                         HandleGetTushita()
                     end

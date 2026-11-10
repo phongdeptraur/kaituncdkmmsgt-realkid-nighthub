@@ -1,6 +1,6 @@
 -- // ==============================================================================
 -- // AXIOM KERNEL V2: UNIFIED CDK + MM + NIGHTHUB API + REALKID HOP + DISCORD PING
--- // PIPELINE: TUSHITA & YAMA (PARALLEL INDRA/ELITE) -> VALKYRIE -> FRACTAL -> MASTERY -> CDK
+-- // PIPELINE: TUẦN TỰ 1 MỤC TIÊU DUY NHẤT: VALKYRIE HELM -> YAMA -> TUSHITA -> MIRROR FRACTAL -> SKULL GUITAR
 -- // ==============================================================================
 
 if not game:IsLoaded() then
@@ -63,7 +63,6 @@ local function CheckIsSea3()
     end
     return false
 end
-
 
 local request_ = request or http_request or (syn and syn.request) or (fluxus and fluxus.request) or (Krnl and Krnl.request)
 
@@ -1415,6 +1414,7 @@ local function WriteRealKidHopConfig(destinationName, allowPortal)
             AuraEnabled = true,
             SearchPause = 5,
             BossEnabled = true,
+            GuitarEnabled = (destinationName == "Guitar" or destinationName == "Skull Guitar" or destinationName == "Full Moon"),
             StoreEnabled = true,
             KenEnabled = false,
             WebhookAddress = "",
@@ -1841,7 +1841,6 @@ local function ResolveItemName(itemId)
     ResolvedNameCache[sId] = name
     return name
 end
-
 
 -- =========================================================================
 -- [HEADLESS PARALLEL 100-PAGE LOW SERVER BROWSER HOP]
@@ -2639,37 +2638,170 @@ local function HandleAutoSkullGuitarWorkflow()
         return
     end
 
-    -- 5. Đủ 3 nguyên liệu -> Check Full Moon & Lấy SGT
-    if IsFullMoonNow() then
-        State.WasDoingSGTFullMoon = true
-        State.CurrentTask = "🌕 [SGT - Sea 3] Đã có Full Moon & đủ 3 nguyên liệu! Bật RealKid [AutoSkullGuitar: true]..."
-        if Engine.StatusLabel then
-            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
-        end
-        StartRealKidWithMode("AutoSGT")
-    else
-        -- Nếu trước đó đang chạy AutoSGT trong Full Moon mà bị hết Full Moon giữa chừng:
-        if State.WasDoingSGTFullMoon or Engine.RealKidMainRunning then
-            State.WasDoingSGTFullMoon = false
-            Engine.RealKidMainRunning = false
-            LastRealKidConfigJson = nil
-            -- Ghi đè tắt AutoSkullGuitar trong file save của RealKidMain để tránh xung đột
-            WriteRealKidMainConfig({
-                AutoFarmMaterialSkullGuitar = false,
-                AutoSkullGuitar             = false,
-            })
-            -- Mở khóa RealKidHop để cho phép khởi chạy lại ngay trong server hiện tại
-            RealKidHopState.IsLaunching = false
-            RealKidHopState.LaunchedInServer = false
-            getgenv()._RealKidHopLaunchedJob = nil
-            Engine.CurrentRealKidDest = nil
+    -- 5. Đã đủ 3 nguyên liệu -> Chỉ cần chạy RealKid Hop với GuitarEnabled: true (KHÔNG CẦN CHẠY REALKID MAIN)
+    Engine.RealKidMainRunning = false
+    State.CurrentTask = "🎸 [SGT - Sea 3] Đã đủ 3 nguyên liệu! Chạy RealKid Hop [GuitarEnabled: true] để lấy Skull Guitar..."
+    if Engine.StatusLabel then
+        Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+    end
+    StartRealKidHop("Guitar")
+end
+
+-- ==============================================================================
+-- [AXIOM V3] STRICT SEQUENTIAL PIPELINE (VALKYRIE -> YAMA -> TUSHITA -> FRACTAL -> SGT)
+-- XÓA BỎ HOÀN TOÀN CƠ CHẾ PARALLEL - CHỈ FARM ĐÚNG 1 MỤC TIÊU DUY NHẤT THEO THỨ TỰ
+-- ==============================================================================
+local function ExecuteSequentialPipeline()
+    if not Engine.IsRunning or Engine.IsHopping then return end
+    if Engine.RealKidMainRunning or Engine.RealKidHopRunning then return end
+
+    SyncItemsPreTeamAndInGame()
+    CheckPostTeamRemotes()
+    UpdateProgressUI()
+
+    local it = State.Items
+    local cfg = getgenv().AutoConfig or { GetMM = true, GetCDK = true, GetSGT = true }
+
+    -- =========================================================================
+    -- BƯỚC 1: VALKYRIE HELM (SEA 3 - SĂN RIP INDRA)
+    -- =========================================================================
+    if cfg.GetMM and not it.ValkyrieHelm then
+        if not CheckIsSea3() then
+            TeleportToSea3()
+            return
         end
 
-        State.CurrentTask = "🌑 [SGT - Sea 3] Hết/Chưa có Full Moon -> Bật RealKidHop [Destination: Full Moon]..."
-        if Engine.StatusLabel then
-            Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
+        local indraAct, hp, maxHp, isInWs, indraM, indraR, indraH = ScanCrossContinentalBoss({ "rip_indra True Form", "rip_indra" })
+        if indraAct and indraR and indraH and indraH.Health > 0 then
+            State.CurrentTask = string.format("👑 [BƯỚC 1: VALKYRIE HELM] Đang đánh rip_indra [HP: %.0f/%.0f]...", tonumber(hp) or 0, tonumber(maxHp) or 1)
+            Engine.CurrentCombatTarget = indraM
+            FlyOverTarget(indraR)
+            return
         end
-        StartRealKidHop("Full Moon")
+
+        -- Chưa có Indra trong server -> Đảm bảo đã đến Castle on the Sea rồi mới Hop
+        if EnsureZoneArrivalBeforeHop("Rip Indra", POS_CASTLE, "Castle on the Sea", { "rip_indra" }) then
+            State.CurrentTask = "👑 [BƯỚC 1: VALKYRIE HELM] Chưa có rip_indra -> Hop tìm server có rip_indra..."
+            DispatchRealKidHop("Rip Indra", true)
+        end
+        return
+    end
+
+    -- =========================================================================
+    -- BƯỚC 2: KIẾM YAMA (SEA 3 - SĂN ELITE HUNTER 30/30 -> RÚT KIẾM YAMA)
+    -- =========================================================================
+    if cfg.GetCDK and not it.Yama then
+        if not CheckIsSea3() then
+            TeleportToSea3()
+            return
+        end
+
+        local kills = GetEliteKills()
+        if kills < 30 then
+            local eliteTarget = scanForElite()
+            if eliteTarget and eliteTarget.Root and eliteTarget.Hum and eliteTarget.Hum.Health > 0 then
+                State.CurrentTask = string.format("🗡️ [BƯỚC 2: YAMA] Đang đánh Elite Boss [%s] (Kills: %d/30)...", eliteTarget.ExactName, kills)
+                Engine.CurrentCombatTarget = eliteTarget.Instance
+                FlyOverTarget(eliteTarget.Root)
+                return
+            end
+
+            State.CurrentTask = string.format("🗡️ [BƯỚC 2: YAMA] Chưa có Elite (Kills: %d/30) -> Hop tìm Elite Hunter...", kills)
+            DispatchRealKidHop("Elite Hunter", true)
+            return
+        else
+            State.CurrentTask = string.format("🗡️ [BƯỚC 2: YAMA] Đã đủ %d/30 Kills! Đang tới thác nước rút kiếm Yama...", kills)
+            PullSealedKatanaFlow(kills)
+            return
+        end
+    end
+
+    -- =========================================================================
+    -- BƯỚC 3: KIẾM TUSHITA (SEA 3 - INDRA -> MỞ CỔNG -> 5 ĐUỐC -> LONGMA)
+    -- =========================================================================
+    if cfg.GetCDK and not it.Tushita then
+        if not CheckIsSea3() then
+            TeleportToSea3()
+            return
+        end
+
+        -- 1. Nếu Longma đang sống -> Đánh Longma lấy Tushita ngay!
+        local lmAct, lmHp, lmMax, _, lmM, lmR, lmH = ScanCrossContinentalBoss({ "Longma" })
+        if lmAct and lmR and lmH and lmH.Health > 0 then
+            State.CurrentTask = string.format("⚔️ [BƯỚC 3: TUSHITA] Đang tiêu diệt Longma [HP: %.0f/%.0f]...", tonumber(lmHp) or 0, tonumber(lmMax) or 1)
+            Engine.CurrentCombatTarget = lmM
+            FlyOverTarget(lmR)
+            return
+        end
+
+        -- 2. Nếu đang cầm Holy Torch -> Thắp đuốc
+        if HasHolyTorch() then
+            State.CurrentTask = "⚔️ [BƯỚC 3: TUSHITA] Đang cầm Holy Torch -> Tiến hành thắp 5 ngọn đuốc..."
+            if typeof(DoTushitaTorchSequence) == "function" then
+                DoTushitaTorchSequence()
+                return
+            end
+        end
+
+        -- 3. Kiểm tra rip_indra để mở cổng Tushita
+        local indraAct, hp, maxHp, isInWs, indraM, indraR, indraH = ScanCrossContinentalBoss({ "rip_indra True Form", "rip_indra" })
+        if indraAct and indraR and indraH and indraH.Health > 0 then
+            State.CurrentTask = string.format("⚔️ [BƯỚC 3: TUSHITA] Có rip_indra [HP: %.0f/%.0f] -> Tiến vào mở cổng Tushita...", tonumber(hp) or 0, tonumber(maxHp) or 1)
+            if typeof(EnterTushitaWaterfallPortal) == "function" then
+                EnterTushitaWaterfallPortal()
+            else
+                TweenToPosition(POS_SEALED_KATANA, CONFIG.TweenSpeed)
+            end
+            return
+        end
+
+        -- 4. Không có Indra -> Pre-Tween (5325.75, 1004.77, 275.70) rồi Hop Indra
+        if EnsurePreTweenBeforeIndraHop({ "rip_indra" }) then
+            State.CurrentTask = "⚔️ [BƯỚC 3: TUSHITA] Chưa có rip_indra -> Hop tìm server có rip_indra..."
+            DispatchRealKidHop("Rip Indra", true)
+        end
+        return
+    end
+
+    -- =========================================================================
+    -- BƯỚC 4: MIRROR FRACTAL (SEA 3 - SĂN DOUGH KING TẠI CAKE LOAF)
+    -- =========================================================================
+    if cfg.GetMM and not it.MirrorFractal then
+        if not CheckIsSea3() then
+            TeleportToSea3()
+            return
+        end
+
+        local dkAct, dkHp, dkMax, _, dkM, dkR, dkH = ScanCrossContinentalBoss({ "Dough King" })
+        if dkAct and dkR and dkH and dkH.Health > 0 then
+            State.CurrentTask = string.format("🪞 [BƯỚC 4: MIRROR FRACTAL] Đang tiêu diệt Dough King [HP: %.0f/%.0f]...", tonumber(dkHp) or 0, tonumber(dkMax) or 1)
+            if not Engine.MirrorTeleported then
+                ExecuteLoafMirrorSequence()
+            end
+            Engine.CurrentCombatTarget = dkM
+            FlyOverTarget(dkR)
+            return
+        end
+
+        -- Chưa có Dough King -> Pre-Tween Cake Loaf rồi Hop Dough King
+        if EnsureZoneArrivalBeforeHop("Dough King", POS_LOAF, "Cake Loaf", { "Dough King" }) then
+            State.CurrentTask = "🪞 [BƯỚC 4: MIRROR FRACTAL] Chưa có Dough King -> Hop tìm server Dough King..."
+            DispatchRealKidHop("Dough King", true)
+        end
+        return
+    end
+
+    -- =========================================================================
+    -- BƯỚC 5: SKULL GUITAR (ECTO -> DARK FRAGMENT -> BONES -> REALKID HOP GUITAR)
+    -- =========================================================================
+    if cfg.GetSGT and not it.SkullGuitar then
+        HandleAutoSkullGuitarWorkflow()
+        return
+    end
+
+    State.CurrentTask = "🎉 ĐÃ HOÀN THÀNH: Valkyrie -> Yama -> Tushita -> Mirror Fractal -> Skull Guitar!"
+    if Engine.StatusLabel then
+        Engine.StatusLabel.Text = "Trạng thái: " .. State.CurrentTask
     end
 end
 
@@ -2835,14 +2967,11 @@ end
 
 TweenToPosition = function(targetPos, speed, abortBossPatterns, abortOnIndraApi, forceAxiom)
     if not Engine.IsRunning then return false end
-    -- [AXIOM FIX]: Tự động mở khóa nếu có mục tiêu combat hoặc đang chạy nhiệm vụ Parallel
-    local isParallelActive = (State.CurrentTask and string.find(State.CurrentTask, "PARALLEL")) ~= nil
-    if forceAxiom or Engine.CurrentCombatTarget ~= nil or isParallelActive then
+    if (Engine.RealKidMainRunning or Engine.RealKidHopRunning) and not forceAxiom then return false end
+    if forceAxiom then
         Engine.RealKidMainRunning = false
         Engine.RealKidHopRunning = false
         Engine.NoClipActive = true
-    elseif (Engine.RealKidMainRunning or Engine.RealKidHopRunning) then
-        return false
     end
     Engine.CurrentTweenToken = (Engine.CurrentTweenToken or 0) + 1
     local token = Engine.CurrentTweenToken
@@ -2855,12 +2984,18 @@ TweenToPosition = function(targetPos, speed, abortBossPatterns, abortOnIndraApi,
     if Engine.CurrentTweenToken ~= token then return false end
 
     local targetV3 = (typeof(targetPos) == "CFrame" and targetPos.Position) or targetPos
-    -- Chỉ tính toán cổng Smart Portal nếu đã có Valkyrie Helmet, nếu chưa có thì tween thẳng như thường
-    local bestPortal = CanUsePortalTween() and CalculateOptimalRoute(targetV3) or nil
 
-    if bestPortal then
+    -- [NÂNG CẤP SMART PORTAL]: Qua cổng xong là kiểm tra tiếp xem còn cổng nào dùng được nữa không trước khi bay thẳng
+    local portalHopCount = 0
+    local usedPortals = {}
+    while CanUsePortalTween() and portalHopCount < 4 do
+        local bestPortal = CalculateOptimalRoute(targetV3)
+        if not bestPortal or usedPortals[bestPortal.Name] then break end
+        usedPortals[bestPortal.Name] = true
+        portalHopCount = portalHopCount + 1
+
         if Engine.StatusLabel then
-            Engine.StatusLabel.Text = string.format("Trạng thái: 🌀 Smart Portal: Bay tới %s...", bestPortal.Name)
+            Engine.StatusLabel.Text = string.format("Trạng thái: 🌀 Smart Portal [%d]: Bay tới %s...", portalHopCount, bestPortal.Name)
         end
         local gatePos = bestPortal.Gate + Vector3.new(0, 3, 0)
         local gateOk = DirectTweenSegment(gatePos, token, abortBossPatterns, abortOnIndraApi)
@@ -2890,35 +3025,21 @@ TweenToPosition = function(targetPos, speed, abortBossPatterns, abortOnIndraApi,
         until not curHrp or (curHrp.Position - bestPortal.Gate).Magnitude > 200 or waitTicks > 20 or Engine.CurrentTweenToken ~= token
 
         if Engine.CurrentTweenToken ~= token then return false end
+        task.wait(0.3) -- Chờ tọa độ ổn định tại điểm ra để kiểm tra tiếp đoạn Smart Portal tiếp theo
     end
 
     return DirectTweenSegment(targetV3, token, abortBossPatterns, abortOnIndraApi)
 end
 
 local function FlyOverTarget(targetPart, abortOnIndraApi)
-    -- [AXIOM FIX]: Giải phóng quyền điều khiển cho Axiom để không bị RealKid làm đứng yên
-    Engine.RealKidMainRunning = false
-    Engine.RealKidHopRunning = false
-    Engine.NoClipActive = true
-    Engine.FastAttackActive = true
-
+    if Engine.RealKidMainRunning or Engine.RealKidHopRunning then return end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not targetPart or not targetPart.Parent then return end
-
-    if hum and hum.Sit then hum.Sit = false end
-    hrp.Anchored = false
-
-    local stabilizer = hrp:FindFirstChild("__AxiomFlightStabilizer") or Instance.new("BodyVelocity")
-    stabilizer.Name = "__AxiomFlightStabilizer"
-    stabilizer.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-    stabilizer.Velocity = Vector3.zero
-    stabilizer.Parent = hrp
 
     local targetCombatPos = targetPart.Position + Vector3.new(0, CONFIG.HoverDistanceY, 0)
     if (hrp.Position - targetCombatPos).Magnitude > 22 then
-        TweenToPosition(targetCombatPos, CONFIG.TweenSpeed, nil, abortOnIndraApi, true)
+        TweenToPosition(targetCombatPos, CONFIG.TweenSpeed, nil, abortOnIndraApi)
     else
         hrp.CFrame = CFrame.lookAt(targetCombatPos, targetPart.Position)
         hrp.AssemblyLinearVelocity = Vector3.zero
@@ -3648,7 +3769,7 @@ local lblCakeRadar       = CreateLabel("🍰 Cake Queen: ⚪ | NightAPI: 0 sv", 
 local lblLongmaRadar     = CreateLabel("🐲 Longma: ⚪", 185, Color3.fromRGB(150, 220, 255), true)
 local lblReaperRadar     = CreateLabel("👻 Soul Reaper: ⚪ | NightAPI: 0 sv", 201, Color3.fromRGB(200, 150, 255), true)
 local lblEliteRadar      = CreateLabel("👹 Elite Boss: ⚪ | NightAPI: 0 sv", 217, Color3.fromRGB(255, 140, 70), true)
-local lblTorch           = CreateLabel("🔥 Parallel Yama+Tushita | Auto Refresh API 5s | Backpack Fruit Ping", 233, Color3.fromRGB(180, 200, 220), false)
+local lblTorch           = CreateLabel("📋 Tuần tự 1 mục tiêu: Valkyrie -> Yama -> Tushita -> Fractal -> Guitar", 233, Color3.fromRGB(180, 200, 220), false)
 
 local StandardLabels = {
     lblTushitaItem, lblValkyrieItem, lblFractalItem, lblYamaItem, lblDarkbeardRadar, lblIndraRadar, lblDoughRadar, lblCakePrinceRadar, lblCakeRadar,
@@ -3715,17 +3836,22 @@ local function UpdateProgressUI()
         return "🟡 [CẦN LÀM]", Color3.fromRGB(255, 215, 80)
     end
 
-    -- 1. Valkyrie Helm
+    -- 1. Valkyrie Helm (STT 1)
     local s1, c1 = fmtStatus(it.ValkyrieHelm, cfg.GetMM)
     TaskBadges[1].Text = string.format("👑 Valkyrie Helm: %s", s1)
     TaskBadges[1].TextColor3 = c1
 
-    -- 2. Mirror Fractal
-    local s2, c2 = fmtStatus(it.MirrorFractal, cfg.GetMM)
-    TaskBadges[2].Text = string.format("🪞 Mirror Fractal: %s", s2)
+    -- 2. Yama (STT 2)
+    local s2, c2 = fmtStatus(it.Yama, cfg.GetCDK)
+    local yMas = it.YamaMas or 0
+    if it.Yama then
+        TaskBadges[2].Text = string.format("🗡️ Kiếm Yama: %s [%d/350]", s2, yMas)
+    else
+        TaskBadges[2].Text = string.format("🗡️ Kiếm Yama: %s (Mas: %d/350)", s2, yMas)
+    end
     TaskBadges[2].TextColor3 = c2
 
-    -- 3. Tushita
+    -- 3. Tushita (STT 3)
     local s3, c3 = fmtStatus(it.Tushita, cfg.GetCDK)
     local tMas = it.TushitaMas or 0
     if it.Tushita then
@@ -3735,17 +3861,12 @@ local function UpdateProgressUI()
     end
     TaskBadges[3].TextColor3 = c3
 
-    -- 4. Yama
-    local s4, c4 = fmtStatus(it.Yama, cfg.GetCDK)
-    local yMas = it.YamaMas or 0
-    if it.Yama then
-        TaskBadges[4].Text = string.format("🗡️ Kiếm Yama: %s [%d/350]", s4, yMas)
-    else
-        TaskBadges[4].Text = string.format("🗡️ Kiếm Yama: %s (Mas: %d/350)", s4, yMas)
-    end
+    -- 4. Mirror Fractal (STT 4)
+    local s4, c4 = fmtStatus(it.MirrorFractal, cfg.GetMM)
+    TaskBadges[4].Text = string.format("🪞 Mirror Fractal: %s", s4)
     TaskBadges[4].TextColor3 = c4
 
-    -- 5. Skull Guitar + Nguyên liệu hiển thị bên cạnh với icon gọn đẹp
+    -- 5. Skull Guitar (STT 5)
     local s5, c5 = fmtStatus(it.SkullGuitar, cfg.GetSGT)
     TaskBadges[5].Text = string.format(
         "🎸 Skull Guitar: %s | 👻 %d/250 | 🖤 %d/1 | 🦴 %d/500",
@@ -3753,16 +3874,9 @@ local function UpdateProgressUI()
     )
     TaskBadges[5].TextColor3 = c5
 
-    -- Cập nhật Label trạng thái nếu có (Đồng bộ chống giật chữ)
+    -- Cập nhật Label trạng thái nếu có
     if typeof(lblStatus) ~= "nil" and State.CurrentTask then
-        pcall(function()
-            local taskText = tostring(State.CurrentTask)
-            if string.sub(taskText, 1, 12) == "Trạng thái: " then
-                lblStatus.Text = taskText
-            else
-                lblStatus.Text = "Trạng thái: " .. taskText
-            end
-        end)
+        pcall(function() lblStatus.Text = "Trạng thái: " .. tostring(State.CurrentTask) end)
     end
 end
 
@@ -5736,9 +5850,7 @@ task.spawn(function()
                     return
                 end
                 if not it.Tushita then
-                    if not (State.CurrentTask and string.find(State.CurrentTask, "PARALLEL")) then
-        State.CurrentTask = "⚔️ [STT 3 - GetCDK] Đang làm nhiệm vụ lấy kiếm Tushita..."
-    end
+                    State.CurrentTask = "⚔️ [STT 3 - GetCDK] Đang làm nhiệm vụ lấy kiếm Tushita..."
                     if typeof(HandleGetTushita) == "function" then
                         HandleGetTushita()
                     end
@@ -5788,6 +5900,18 @@ task.spawn(function()
             end
 
             State.CurrentTask = "✅ Đã hoàn thành toàn bộ các mục được bật trong AutoConfig!"
+        end)
+        task.wait(0.5)
+    end
+end)
+
+-- [AXIOM V3 WORKER] Kích hoạt luồng chạy tuần tự 1 mục tiêu duy nhất
+task.spawn(function()
+    while Engine.IsRunning do
+        pcall(function()
+            if Engine.CharacterLoaded and not Engine.IsHopping and not Engine.RealKidHopRunning and not Engine.RealKidMainRunning then
+                ExecuteSequentialPipeline()
+            end
         end)
         task.wait(0.5)
     end

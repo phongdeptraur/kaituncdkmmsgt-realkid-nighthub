@@ -1,8 +1,8 @@
 -- AUTO INDRA (Haki acc + Clone accs) | tween speed 190 | smart portal | sync qua file IndraSync/
 repeat task.wait() until game:IsLoaded()
 local G = getgenv()
-if G._Indra then pcall(G._Indra.Stop) end
-local S = { Run = true, act = "Khởi tạo" }
+if G._Indra and G._Indra.Run then pcall(G._Indra.Stop) task.wait(0.3) end
+local S = { Run = true, Done = false, act = "Khởi tạo" }
 G._Indra = S
 
 local HAKI, SPEED, DIR = "znwfhkjbc", 190, "IndraSync"
@@ -391,6 +391,44 @@ local function Chest()
     if Go(best:GetPivot().Position, nil, ("Nhặt chest %d/30"):format(ch.n + 1)) then ch.n += 1 end
 end
 
+-- ============ elite (đủ 30 kill cho Yama; elite cũng rơi chalice) ============
+local ELITE = { "diablo", "deandre", "urban" }
+local ELITE_PTS = { V3(-5415, 314, -2800), V3(5350, 1005, 400), V3(-11800, 332, -8800), V3(-13200, 428, -7760), V3(-2200, 38, -10200), V3(-4900, 66, -150) }
+local kT, kV, eT, eIdx = 0, nil, 0, 1
+local function Kills()
+    if os.clock() - kT > 2 then
+        kT = os.clock()
+        local r = Inv("EliteHunter", "Progress")
+        kV = type(r) == "number" and r or type(r) == "string" and tonumber(r:match("%d+")) or type(r) == "table" and tonumber(r.Kills or r.Progress or r[1]) or kV
+    end
+    return kV
+end
+local function NeedElite()
+    if Has("Yama") then return false end
+    local k = Kills()
+    return k ~= nil and k < 30
+end
+local function EliteQuest()
+    local pg = LP:FindFirstChild("PlayerGui")
+    local t = pg and pg:FindFirstChild("TrackedQuestFrame")
+    local hd = t and t.Enabled and t:FindFirstChild("Frame") and t.Frame.Visible and t.Frame:FindFirstChild("header")
+    local tx = hd and hd:FindFirstChild("textLabel") and hd.textLabel.Text:lower() or ""
+    for _, p in ipairs(ELITE) do if tx:find(p, 1, true) then return true end end
+end
+local function Elite()
+    local m, _, _, live, pos = Find(ELITE)
+    Say(("Săn Elite (%s/30)"):format(tostring(kV)))
+    if not m then return HopLow("Không có Elite -> hop low") end
+    if not EliteQuest() and os.clock() - eT > 1.5 then
+        eT = os.clock()
+        task.spawn(Inv, "EliteHunter")
+    end
+    if live or (pos and pos.Magnitude > 50) then return Boss(ELITE, pos) end
+    local pt = ELITE_PTS[eIdx]
+    eIdx = eIdx % #ELITE_PTS + 1
+    Go(pt, function() local em, _, _, lv, p = Find(ELITE) return not em or lv or (p ~= nil and p.Magnitude > 50) end, "Tuần tra tìm Elite")
+end
+
 local dT, dV = 0, false
 local function Door()
     if os.clock() - dT > 1 then
@@ -466,6 +504,7 @@ local function CloneStep()
     for _, e in ipairs(Entries()) do
         if e.ready and not e.summoned then return Join(e.job) end
     end
+    if NeedElite() then return Elite() end
     Chest()
 end
 -- đánh dấu có file để xóa khi hết cup
@@ -474,7 +513,11 @@ task.spawn(function() while S.Run do if Has("God's Chalice") then S.hasFile = tr
 -- ============ UI ============
 local gui = Instance.new("ScreenGui")
 gui.Name, gui.ResetOnSpawn = "IndraGui", false
-pcall(function() gui.Parent = (typeof(gethui) == "function" and gethui()) or Svc "CoreGui" end)
+pcall(function()
+    local par = (typeof(gethui) == "function" and gethui()) or Svc "CoreGui"
+    local old = par:FindFirstChild("IndraGui") if old then old:Destroy() end
+    gui.Parent = par
+end)
 local f = Instance.new("Frame", gui)
 f.Size, f.Position, f.BackgroundColor3, f.BorderSizePixel, f.Active, f.Draggable = UDim2.new(0, 290, 0, 150), UDim2.new(0, 12, 0.5, -75), Color3.fromRGB(20, 20, 26), 0, true, true
 Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
@@ -500,7 +543,6 @@ local function Unload()
     pcall(Float, false)
     pcall(delfile, myFile)
     pcall(function() gui:Destroy() end)
-    if G._Indra == S then G._Indra = nil end
 end
 S.Stop = Unload
 x.MouseButton1Click:Connect(Unload)
@@ -529,6 +571,11 @@ task.spawn(function()
         task.wait(0.15)
     end
     while S.Run do
+        if Has("Valkyrie Helm") and Has("Tushita") then
+            S.Done = true Say("HOÀN TẤT")
+            Unload() -- trả quyền điều khiển cho hub
+            break
+        end
         if not S.Hop then
             S.weapon, S.noAttack, S.target = nil, false, nil
             local ok, e = pcall(isHaki and HakiStep or CloneStep)

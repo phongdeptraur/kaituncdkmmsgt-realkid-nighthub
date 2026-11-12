@@ -8,6 +8,7 @@ local S = {
     Done = false,
     act = "Khởi tạo",
     joinTime = os.time(),
+    spawnClock = os.clock(),
     lastJob = tostring(game.JobId)
 }
 G._Indra = S
@@ -111,7 +112,6 @@ local function InBag(n)
     return (bp and bp:FindFirstChild(n)) or (c and c:FindFirstChild(n))
 end
 
--- Lưu ý: God's Chalice và Holy Torch là Tool rơi trực tiếp vào túi đồ, chỉ check InBag để tránh cache ảo
 local function Has(n)
     if n == "God's Chalice" or n == "Holy Torch" then
         return InBag(n) ~= nil
@@ -385,7 +385,6 @@ local function Entries()
                 local ok3, d = pcall(function() return HS:JSONDecode(raw) end)
                 if ok3 and type(d) == "table" and d.name then
                     local age = now - (tonumber(d.t) or 0)
-                    -- 60s không cập nhật tức là offline
                     if age >= -120 and age <= 60 then
                         o[#o + 1] = d
                     elseif age > 60 then
@@ -429,6 +428,7 @@ local function UpdatePresence()
     if S.lastJob ~= curJob then
         S.lastJob = curJob
         S.joinTime = os.time()
+        S.spawnClock = os.clock()
     end
 
     local cup = InBag("God's Chalice") ~= nil
@@ -452,7 +452,6 @@ local function UpdatePresence()
     pcall(writefile, myFile, HS:JSONEncode(data))
 end
 
--- Khởi tạo presence ngay khi bật script
 UpdatePresence()
 
 -- Lấy danh sách các acc đang có cup từ file (ưu tiên acc ra cup sớm nhất)
@@ -460,7 +459,6 @@ local function GetCupQueues()
     local cups = {}
     for _, e in ipairs(Entries()) do
         if e.cup and not e.summoned and e.job and e.job ~= "" then
-            -- Nếu là cùng server hiện tại, xác thực người đó thực sự đang ở trong server để tránh file ảo
             if e.job ~= tostring(game.JobId) or Players:FindFirstChild(e.name) then
                 table.insert(cups, e)
             end
@@ -485,9 +483,7 @@ local function GetServerCupHolderFromFile()
 
     for _, e in ipairs(Entries()) do
         if e.name ~= LP.Name and e.job == myJob and (e.cup or e.summoned) then
-            local pl = Players:FindFirstChild(e.name)
-            -- Người có cup trong file phải đang có mặt ở server này
-            if pl then
+            if Players:FindFirstChild(e.name) then
                 table.insert(holders, e.name)
             end
         end
@@ -502,7 +498,6 @@ local function AllActiveClonesInServer()
     local cloneCount = 0
     for _, e in ipairs(Entries()) do
         if not e.isHaki then
-            -- Bỏ qua acc đang bận giữ cup ở một server khác
             if not (e.cup and e.job ~= myJob) then
                 cloneCount = cloneCount + 1
                 if e.job ~= myJob or not Players:FindFirstChild(e.name) then
@@ -578,7 +573,7 @@ local function Join(job)
     TeleportToJob(job)
 end
 
--- ============ QUÉT SERVER SIÊU TỐC (150 TRANG SONG SONG TỪ SCRIPT MẪU) ============
+-- ============ QUÉT SERVER SIÊU TỐC (150 TRANG SONG SONG) ============
 local function FetchFullServers()
     local RawServerList = {}
     local browser = RS:FindFirstChild("__ServerBrowser")
@@ -673,9 +668,10 @@ end
 local function HopLow(why)
     if S.Hop or not S.Run then return end
     S.Hop = true
+    local reason = why or "Hop"
     if curTw then pcall(function() curTw:Cancel() end) curTw = nil end
     pcall(Float, false)
-    Say(why or "Đang quét server vắng...")
+    Say(("[%s] Đang quét server..."):format(reason))
 
     task.spawn(function()
         local hopStart = os.clock()
@@ -684,7 +680,6 @@ local function HopLow(why)
         MarkServerAnti(game.JobId, 300)
 
         while S.Run and S.Hop do
-            -- Nếu là acc Haki và có clone báo cup -> hủy hop, qua mở pad ngay
             if isHaki then
                 local cupQueues = GetCupQueues()
                 for _, cq in ipairs(cupQueues) do
@@ -696,15 +691,17 @@ local function HopLow(why)
                     end
                 end
             else
-                -- Nếu là Clone không cầm cup và có server đã mở đủ 3 pad -> hủy hop, join ngay
-                if not InBag("God's Chalice") then
-                    for _, cq in ipairs(GetCupQueues()) do
-                        if cq.ready and not cq.summoned and cq.job ~= tostring(game.JobId) then
-                            S.Hop = false
-                            Say(("Server %s đã mở 3 pad -> Join ngay!"):format(tostring(cq.name)))
-                            Join(cq.job)
-                            return
-                        end
+                if InBag("God's Chalice") then
+                    S.Hop = false
+                    Say("Đã có God's Chalice -> Hủy Hop!")
+                    return
+                end
+                for _, cq in ipairs(GetCupQueues()) do
+                    if cq.ready and not cq.summoned and cq.job ~= tostring(game.JobId) then
+                        S.Hop = false
+                        Say(("Server %s đã mở 3 pad -> Join ngay!"):format(tostring(cq.name)))
+                        Join(cq.job)
+                        return
                     end
                 end
             end
@@ -715,19 +712,16 @@ local function HopLow(why)
                 return
             end
 
-            Say("Đang quét 150 trang server (siêu tốc)...")
             local blocked = GetBlockedJobs()
             local rawList = FetchFullServers()
             local pool = {}
 
-            -- Ưu tiên 1: Server 1-5 người, vùng Singapore/VN ping thấp trước
             for _, s in ipairs(rawList) do
                 if not blocked[s.id] and s.playing >= 1 and s.playing <= 5 and s.playing < s.max then
                     table.insert(pool, s)
                 end
             end
 
-            -- Ưu tiên 2: Server 1-8 người
             if #pool == 0 then
                 for _, s in ipairs(rawList) do
                     if not blocked[s.id] and s.playing >= 1 and s.playing <= 8 and s.playing < s.max then
@@ -736,7 +730,6 @@ local function HopLow(why)
                 end
             end
 
-            -- Ưu tiên 3: Bất kỳ server nào còn trống (< 11 người)
             if #pool == 0 then
                 for _, s in ipairs(rawList) do
                     if not blocked[s.id] and s.playing >= 1 and s.playing <= 10 and s.playing < s.max then
@@ -746,7 +739,7 @@ local function HopLow(why)
             end
 
             if #pool == 0 then
-                Say("Chưa lọc được server, quét lại...")
+                Say(("[%s] Chưa lọc được server, quét lại..."):format(reason))
                 S.vis = { [tostring(game.JobId)] = true }
                 task.wait(0.5)
             else
@@ -757,10 +750,14 @@ local function HopLow(why)
 
                 for i = 1, math.min(#pool, 6) do
                     if not S.Run or not S.Hop then break end
+                    if not isHaki and InBag("God's Chalice") then
+                        S.Hop = false
+                        return
+                    end
                     local cand = pool[i]
                     MarkServerAnti(cand.id, 180)
                     S.vis[cand.id] = true
-                    Say(("Hop -> %s (%d/%d | %dms)"):format(cand.id:sub(1, 8), cand.playing, cand.max, cand.ping))
+                    Say(("[%s] -> %s (%d/%d | %dms)"):format(reason, cand.id:sub(1, 8), cand.playing, cand.max, cand.ping))
                     TeleportToJob(cand.id)
                     task.wait(3.5)
                 end
@@ -797,7 +794,7 @@ local function HakiStep()
                     Say(("Đủ 3 pad -> Qua mở tiếp cho %s"):format(tostring(nextCup.name)))
                     return Join(nextCup.job)
                 else
-                    return HopLow("Đủ 3 pad -> Hop nhường slot cho Clone")
+                    return HopLow("Đủ 3 pad, nhường slot")
                 end
             end
         end
@@ -880,9 +877,19 @@ local function GetChest()
         end
     end
 
-    for _, c in ipairs(workspace:GetChildren()) do Check(c) end
+    -- 1. Quét tag chuẩn của Blox Fruits
     for _, c in ipairs(CS:GetTagged("_ChestTagged")) do Check(c) end
 
+    -- 2. Quét trong thư mục ChestModels (nếu có)
+    local cm = workspace:FindFirstChild("ChestModels")
+    if cm then
+        for _, c in ipairs(cm:GetChildren()) do Check(c) end
+    end
+
+    -- 3. Quét trực tiếp con của Workspace
+    for _, c in ipairs(workspace:GetChildren()) do Check(c) end
+
+    -- 4. Quét sâu trong Map nếu vẫn chưa thấy
     local map = workspace:FindFirstChild("Map")
     if not best and map then
         for _, c in ipairs(map:GetDescendants()) do
@@ -897,17 +904,17 @@ end
 
 local function Chest()
     if ch.job ~= tostring(game.JobId) then
-        ch = { job = tostring(game.JobId), n = 0, t0 = os.clock(), seen = {} }
+        ch = { job = tostring(game.JobId), n = 0, t0 = os.clock(), seen = {}, emptyRetries = 0 }
     end
 
     -- Anti trùng server khi farm: Chỉ acc vào server SAU mới hop
     local isLate, olderAcc = CheckLateJoinerConflict()
     if isLate then
-        return HopLow("Vào sau " .. tostring(olderAcc) .. " -> Nhường server, Hop!")
+        return HopLow("Trùng SV với " .. tostring(olderAcc))
     end
 
-    if ch.n >= 30 or os.clock() - ch.t0 > 60 then
-        return HopLow(("Chest %d/30 / TTL 60s -> Hop"):format(ch.n))
+    if ch.n >= 30 or os.clock() - ch.t0 > 75 then
+        return HopLow(("Đã nhặt %d/30 chest"):format(ch.n))
     end
 
     local r = Root()
@@ -915,8 +922,16 @@ local function Chest()
 
     local chest = GetChest()
     if not chest then
-        return HopLow("Hết chest -> Hop")
+        -- Chống lỗi vừa vào server map chưa kịp stream rương đã vội Hop
+        ch.emptyRetries = (ch.emptyRetries or 0) + 1
+        if ch.emptyRetries <= 8 then
+            Say(("Đang chờ tải rương (%d/8)..."):format(ch.emptyRetries))
+            task.wait(0.6)
+            return
+        end
+        return HopLow("Hết chest")
     end
+    ch.emptyRetries = 0
 
     local targetPos = chest:GetPivot().Position
     local dStart = (r.Position - targetPos).Magnitude
@@ -956,16 +971,12 @@ local function Chest()
     end
 end
 
--- ============ elite (đủ 30 kill cho Yama; elite cũng rơi chalice) ============
+-- ============ elite (nhận quest trước -> có Elite thì đánh, không có thì đi nhặt Chest) ============
 local ELITE = { "diablo", "deandre", "urban" }
-local ELITE_PTS = {
-    V3(-5415, 314, -2800), V3(5350, 1005, 400), V3(-11800, 332, -8800),
-    V3(-13200, 428, -7760), V3(-2200, 38, -10200), V3(-4900, 66, -150)
-}
-local kT, kV, eT, eIdx = 0, nil, 0, 1
+local kT, kV, eT = 0, nil, 0
 
 local function Kills()
-    if os.clock() - kT > 2 then
+    if os.clock() - kT > 3 then
         kT = os.clock()
         local r = Inv("EliteHunter", "Progress")
         kV = type(r) == "number" and r
@@ -990,33 +1001,39 @@ local function EliteQuest()
     for _, p in ipairs(ELITE) do
         if tx:find(p, 1, true) then return true end
     end
+    return false
 end
 
-local function Elite()
+-- Trả về true nếu đang săn Elite trong server, false nếu server không có Elite (để chuyển sang nhặt Chest)
+local function TryElite()
     local isLate, olderAcc = CheckLateJoinerConflict()
     if isLate then
-        return HopLow("Vào sau " .. tostring(olderAcc) .. " -> Nhường server, Hop!")
+        HopLow("Trùng SV với " .. tostring(olderAcc))
+        return true
     end
 
-    local m, _, _, live, pos = Find(ELITE)
-    Say(("Săn Elite (%s/30)"):format(tostring(kV)))
-    if not m then return HopLow("Không có Elite -> Hop") end
-    if not EliteQuest() and os.clock() - eT > 1.5 then
+    -- Bước 1: Gọi nhận quest EliteHunter trước để game spawn boss Elite nếu có
+    if not EliteQuest() and os.clock() - eT > 2.5 then
         eT = os.clock()
-        task.spawn(Inv, "EliteHunter")
+        pcall(Inv, "EliteHunter")
+        task.wait(0.25)
     end
-    if live or (pos and pos.Magnitude > 50) then return Boss(ELITE, pos) end
-    local pt = ELITE_PTS[eIdx]
-    eIdx = eIdx % #ELITE_PTS + 1
-    Go(pt, function()
-        local em, _, _, lv, p = Find(ELITE)
-        return not em or lv or (p ~= nil and p.Magnitude > 50)
-    end, "Tuần tra tìm Elite")
+
+    -- Bước 2: Tìm xem có boss Elite trong server không
+    local m, _, _, live, pos = Find(ELITE)
+    if m and (live or (pos and pos.Magnitude > 50)) then
+        Say(("Đang săn Elite: %s (%s/30)"):format(m.Name, tostring(kV or "?")))
+        Boss(ELITE, pos)
+        return true
+    end
+
+    -- Server hiện tại không có Elite -> trả về false để đi farm Chest kiếm Cup (KHÔNG hop vội!)
+    return false
 end
 
 local dT, dV = 0, false
 local function Door()
-    if os.clock() - dT > 1 then
+    if os.clock() - dT > 2 then
         dT = os.clock()
         local p = Inv("TushitaProgress")
         if type(p) == "table" then dV = p.OpenedDoor == true end
@@ -1030,7 +1047,6 @@ local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList)
     local holderStr = (cupHoldersList and #cupHoldersList > 0) and table.concat(cupHoldersList, ",") or "Cup"
     local desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
 
-    -- Chỉ khi acc KHÔNG cầm cup, server CÓ cup thực sự (qua file) và acc đang thiếu Tushita mới đợi ở Hydra
     if not isHolder and serverHasCup and needTushita then
         targetPos = P.Hydra
         desc = "Đợi ở Hydra chờ Tushita (Cup: " .. holderStr .. ")"
@@ -1048,6 +1064,12 @@ local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList)
 end
 
 local function CloneStep()
+    -- Đợi 2 giây đầu khi mới vào server để Inventory và Map kịp đồng bộ
+    if os.clock() - (S.spawnClock or 0) < 2 then
+        Say("Đang đồng bộ dữ liệu server...")
+        return
+    end
+
     local nh, nt = not Has("Valkyrie Helm"), not Has("Tushita")
     if not (nh or nt) then
         Say("HOÀN TẤT")
@@ -1055,21 +1077,7 @@ local function CloneStep()
     end
     if not Need(3) then return end
 
-    -- Nếu đã mở cửa Tushita -> đi đánh Longma
-    if nt and Door() then
-        S.weapon = nil
-        if not Boss({ "longma" }, P.Longma) then
-            local r = Root()
-            if r and (r.Position - P.Longma).Magnitude > 60 then
-                Go(P.Longma, function() return Find({ "longma" }) end, "Đang tới hang Longma")
-            else
-                HopLow("Không có Longma -> Hop")
-            end
-        end
-        return
-    end
-
-    -- Nếu Rip Indra đang sống trong server
+    -- 1. Nếu Rip Indra đang xuất hiện trong server -> ưu tiên xử lý ngay
     if Find(INDRA) then
         if nh then
             Boss(INDRA, P.Castle)
@@ -1094,7 +1102,7 @@ local function CloneStep()
     local myCup = InBag("God's Chalice") ~= nil
     local summoning = S.sumT and (os.clock() - S.sumT < 35)
 
-    -- 1. NẾU ACC NÀY ĐANG CẦM CUP HOẶC VỪA SUMMON
+    -- 2. NẾU ACC NÀY ĐANG CẦM CUP HOẶC VỪA SUMMON
     if myCup or summoning then
         UpdatePresence()
         if summoning then
@@ -1111,8 +1119,6 @@ local function CloneStep()
         local isFullServer = (#Players:GetPlayers() >= 12)
         local allClonesJoined = AllActiveClonesInServer()
 
-        -- Điều kiện spawn Indra:
-        -- Đủ 3 pad Haki + (acc Haki đã rời) + (Full 12 người HOẶC Tất cả các acc Clone chạy Indra online đã vào server)
         if padsReady and not zn and (isFullServer or allClonesJoined) then
             Equip("God's Chalice")
             if Go(P.Detect, nil, "Tới bệ Summon Indra") then
@@ -1132,17 +1138,12 @@ local function CloneStep()
         return
     end
 
-    -- 2. NẾU ACC NÀY KHÔNG CẦM CUP
-    -- Đọc từ file xem server hiện tại có ai cầm cup không
+    -- 3. NẾU ACC NÀY KHÔNG CẦM CUP -> KIỂM TRA SERVER HIỆN TẠI HOẶC SERVER KHÁC CÓ CUP KHÔNG
     local serverHasCup, cupHolders = GetServerCupHolderFromFile()
-
     if serverHasCup then
-        -- Server hiện tại thực sự có người cầm cup -> Đợi ở Hydra (nếu thiếu Tushita) hoặc Sea Castle
         return WaitAtSpot(false, true, cupHolders)
     end
 
-    -- Server hiện tại KHÔNG có cup:
-    -- Kiểm tra xem có server khác đã mở đủ 3 pad (ready) và có người cầm cup không để join vào
     local readyQueues = {}
     for _, e in ipairs(GetCupQueues()) do
         if e.ready and not e.summoned and e.job ~= tostring(game.JobId) then
@@ -1155,8 +1156,30 @@ local function CloneStep()
         return Join(readyQueues[1].job)
     end
 
-    -- Không có cup ở server này và chưa có server nào ready -> Đi săn Elite hoặc nhặt Chest (hết sẽ tự Hop, KHÔNG đứng kẹt ở Hydra)
-    if NeedElite() then return Elite() end
+    -- 4. Nếu chỉ còn thiếu Tushita (đã có Valkyrie Helm) và đã mở cửa Tushita -> đi săn Longma
+    if not nh and nt and Door() then
+        S.weapon = nil
+        if not Boss({ "longma" }, P.Longma) then
+            local r = Root()
+            if r and (r.Position - P.Longma).Magnitude > 60 then
+                Go(P.Longma, function() return Find({ "longma" }) end, "Đang tới hang Longma")
+            else
+                return HopLow("Longma chưa spawn")
+            end
+        end
+        return
+    end
+
+    -- 5. ĐI KIẾM GOD'S CHALICE:
+    -- Nếu chưa đủ 30 Elite cho Yama (hoặc muốn săn Elite rơi Cup) -> kiểm tra Elite trước
+    if NeedElite() then
+        if TryElite() then return end
+    else
+        -- Kể cả khi đủ 30 kill Yama, vẫn thử nhận quest Elite vì giết Elite có tỉ lệ rơi God's Chalice
+        if TryElite() then return end
+    end
+
+    -- Nếu server hiện tại không có Elite -> Đi nhặt Chest kiếm God's Chalice!
     Chest()
 end
 
@@ -1272,6 +1295,7 @@ task.spawn(function()
         if not LP.Team then Inv("SetTeam2", "Marines") end
         task.wait(0.15)
     end
+    S.spawnClock = os.clock()
     while S.Run do
         if not isHaki and Has("Valkyrie Helm") and Has("Tushita") then
             S.Done = true

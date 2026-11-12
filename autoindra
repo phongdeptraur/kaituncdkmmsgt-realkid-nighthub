@@ -266,63 +266,64 @@ local function Boss(pats, at)
     return true
 end
 
--- ============ hop low (1-5 người) ============
-local function HopLow(why)
-    if S.Hop or not S.Run then return end
-    S.Hop = true Float(false) Say(why or "Hop low...")
-    task.spawn(function()
-        S.vis = S.vis or {}
-        S.vis[game.JobId] = true
-        local br = RS:WaitForChild("__ServerBrowser")
-        while S.Run do
-            local pool, done = {}, 0
-            for p = 1, 60 do
-                task.spawn(function()
-                    local ok, r = pcall(br.InvokeServer, br, p)
-                    if ok and type(r) == "table" then
-                        for id, d in pairs(r) do
-                            local c = (type(d) == "table" and tonumber(d.Count)) or tonumber(d) or 99
-                            if c >= 1 and c <= 5 and not S.vis[id] then pool[#pool + 1] = { id = tostring(id), c = c } end
-                        end
-                    end
-                    done += 1
-                end)
+-- ============ anti chung sever & sync (file) ============
+local ANTI_FILE = DIR .. "/anti_servers.json"
+local myFile = DIR .. "/" .. LP.Name .. ".json"
+
+local function GetAntiServers()
+    local list = {}
+    pcall(function()
+        if isfile and isfile(ANTI_FILE) then
+            local raw = readfile(ANTI_FILE)
+            local ok, data = pcall(function() return HS:JSONDecode(raw) end)
+            if ok and type(data) == "table" then
+                list = data
             end
-            local t0 = os.clock()
-            repeat task.wait(0.05) until done >= 60 or os.clock() - t0 > 2.5
-            table.sort(pool, function(a, b) return a.c < b.c end)
-            for i = 1, math.min(#pool, 5) do
-                S.vis[pool[i].id] = true
-                Say(("Hop low -> %s (%d người)"):format(pool[i].id:sub(1, 8), pool[i].c))
-                pcall(br.InvokeServer, br, "teleport", pool[i].id)
-                task.wait(1.2)
-            end
-            if #pool == 0 then S.vis = { [game.JobId] = true } end
-            task.wait(0.4)
         end
     end)
-end
-local lastJoin = 0
-local function Join(job)
-    if os.clock() - lastJoin < 6 then return end
-    lastJoin = os.clock()
-    Say("Đang join server " .. job:sub(1, 8))
-    pcall(function() RS.__ServerBrowser:InvokeServer("teleport", job) end)
+    local now = os.time()
+    local changed = false
+    for jid, exp in pairs(list) do
+        if type(exp) ~= "number" or exp <= now then
+            list[jid] = nil
+            changed = true
+        end
+    end
+    if changed then
+        pcall(function() writefile(ANTI_FILE, HS:JSONEncode(list)) end)
+    end
+    return list
 end
 
--- ============ sync (file) ============
+local function MarkServerAnti(jobId, durationSeconds)
+    if not jobId or jobId == "" then return end
+    durationSeconds = durationSeconds or 300
+    local list = GetAntiServers()
+    list[tostring(jobId)] = os.time() + durationSeconds
+    pcall(function() writefile(ANTI_FILE, HS:JSONEncode(list)) end)
+end
+
 local function Entries()
     local o = {}
     local ok, fl = pcall(listfiles, DIR)
+    local now = os.time()
     for _, f in ipairs(ok and fl or {}) do
-        local ok2, d = pcall(function() return HS:JSONDecode(readfile(f)) end)
-        if ok2 and type(d) == "table" and os.time() - (d.t or 0) < 30 then o[#o + 1] = d end
+        local fname = f:match("[^/\\]+$") or f
+        if not fname:lower():find("anti") and not fname:lower():find("visited") and not fname:lower():find("bl") then
+            local ok2, d = pcall(function() return HS:JSONDecode(readfile(f)) end)
+            if ok2 and type(d) == "table" then
+                local age = now - (d.t or 0)
+                if age < 35 then
+                    o[#o + 1] = d
+                elseif age > 300 then
+                    pcall(delfile, f)
+                end
+            end
+        end
     end
     return o
 end
-local myFile = DIR .. "/" .. LP.Name .. ".json"
 
--- ============ pads ============
 local function PadOpen(p)
     local ok, r = pcall(function()
         for _, d in ipairs(workspace.Map["Boat Castle"].Summoner.Circle:GetDescendants()) do
@@ -340,11 +341,248 @@ local function Eq(id)
     pcall(function() Net["RF/ModificationFunction"]:InvokeServer({ Type = "SetEquip", IsEquipped = true, ItemId = id }) end)
 end
 
+local function UpdatePresence()
+    local cup = Has("God's Chalice")
+    local summoning = S.sumT and (os.clock() - S.sumT < 40)
+    local data = {
+        name = LP.Name,
+        job = tostring(game.JobId),
+        t = os.time(),
+        isHaki = isHaki,
+        cup = cup and true or false,
+        ready = PadsAll(),
+        summoned = summoning and true or false
+    }
+    pcall(writefile, myFile, HS:JSONEncode(data))
+end
+
+-- Ghi nhận server hiện tại vào anti chung server ngay khi script khởi chạy
+MarkServerAnti(game.JobId, 600)
+UpdatePresence()
+
+local function GetBlockedJobs()
+    local blocked = {}
+    local myJob = tostring(game.JobId)
+    blocked[myJob] = true
+
+    -- 1. Anti servers file (chung giữa tất cả acc)
+    local anti = GetAntiServers()
+    for jid, _ in pairs(anti) do
+        blocked[tostring(jid)] = true
+    end
+
+    -- 2. Quét toàn bộ acc đang active trong folder sync (né tuyệt đối server acc khác đang đứng)
+    for _, e in ipairs(Entries()) do
+        if e.name ~= LP.Name and e.job and e.job ~= "" then
+            blocked[tostring(e.job)] = true
+        end
+    end
+
+    -- 3. Cache visited của session này
+    if S.vis then
+        for jid, _ in pairs(S.vis) do
+            blocked[tostring(jid)] = true
+        end
+    end
+
+    -- 4. Check file visited của CDKProgress nếu có
+    pcall(function()
+        if isfile and isfile("CDKProgress/visited.json") then
+            local raw = readfile("CDKProgress/visited.json")
+            local ok, dt = pcall(function() return HS:JSONDecode(raw) end)
+            if ok and type(dt) == "table" then
+                local now = os.time()
+                for jid, v in pairs(dt) do
+                    if type(v) == "number" and (now - v < 300) then
+                        blocked[tostring(jid)] = true
+                    end
+                end
+            end
+        end
+    end)
+
+    return blocked
+end
+
+-- ============ teleport / join (bắt buộc dùng __ServerBrowser InvokeServer) ============
+local function TeleportToJob(JOB_ID)
+    if JOB_ID and JOB_ID ~= "" and JOB_ID ~= tostring(game.JobId) then
+        local browser = RS:FindFirstChild("__ServerBrowser") or RS:WaitForChild("__ServerBrowser", 5)
+        if browser then
+            pcall(function() browser:InvokeServer("teleport", JOB_ID) end)
+        end
+    end
+end
+
+local lastJoin = 0
+local function Join(job)
+    if not job or job == "" or job == tostring(game.JobId) then return end
+    if os.clock() - lastJoin < 6 then return end
+    lastJoin = os.clock()
+    Say("Đang join server " .. tostring(job):sub(1, 8))
+    TeleportToJob(job)
+end
+
+-- ============ hop low (1-5 người + scan server sâu + anti chung sever) ============
+local function FetchFullServers()
+    local rawList = {}
+    local browser = RS:FindFirstChild("__ServerBrowser")
+
+    if browser then
+        local completed = 0
+        local totalPages = 150
+        local byJob = {}
+
+        for page = 1, totalPages do
+            task.spawn(function()
+                for _ = 1, 2 do
+                    local ok, res = pcall(function() return browser:InvokeServer(page) end)
+                    if ok and type(res) == "table" then
+                        for jobId, data in pairs(res) do
+                            local id = tostring(jobId)
+                            if id ~= tostring(game.JobId) and not byJob[id] then
+                                local count = (type(data) == "table" and tonumber(data.Count)) or tonumber(data) or 1
+                                local reg = (type(data) == "table" and tostring(data.Region or "")) or "Unknown"
+
+                                local numericPing = 90
+                                if reg:find("Sing") then
+                                    numericPing = math.random(32, 48)
+                                elseif reg:find("Japan") then
+                                    numericPing = math.random(85, 110)
+                                elseif reg:find("Germ") then
+                                    numericPing = math.random(170, 210)
+                                elseif reg:find("United States") or reg:find("US") then
+                                    numericPing = math.random(210, 260)
+                                end
+
+                                byJob[id] = {
+                                    id = id,
+                                    playing = count,
+                                    max = 12,
+                                    region = reg,
+                                    ping = numericPing
+                                }
+                            end
+                        end
+                        break
+                    end
+                    task.wait(0.04)
+                end
+                completed = completed + 1
+            end)
+        end
+
+        local start = os.clock()
+        repeat task.wait(0.05) until completed >= totalPages or (os.clock() - start) >= 3.5
+
+        for _, item in pairs(byJob) do
+            table.insert(rawList, item)
+        end
+    end
+
+    if #rawList == 0 then
+        local cursor = ""
+        local pageCount = 0
+
+        while cursor and pageCount < 20 do
+            pageCount = pageCount + 1
+            local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s", 
+                game.PlaceId, (cursor ~= "" and "&cursor=" .. cursor or ""))
+
+            local ok, res = pcall(function() return game:HttpGet(url) end)
+            if not ok or not res then break end
+
+            local okJson, data = pcall(function() return HS:JSONDecode(res) end)
+            if not okJson or not data or not data.data then break end
+
+            for _, s in ipairs(data.data) do
+                local id = tostring(s.id)
+                if id ~= tostring(game.JobId) then
+                    table.insert(rawList, {
+                        id = id,
+                        playing = tonumber(s.playing) or 0,
+                        max = tonumber(s.maxPlayers) or 12,
+                        ping = tonumber(s.ping) or 999,
+                        region = "Unknown"
+                    })
+                end
+            end
+
+            cursor = data.nextPageCursor
+            if not cursor or cursor == "" then break end
+        end
+    end
+    return rawList
+end
+
+local function HopLow(why)
+    if S.Hop or not S.Run then return end
+    S.Hop = true
+    if curTw then pcall(function() curTw:Cancel() end) curTw = nil end
+    pcall(Float, false)
+    Say(why or "Hop low...")
+
+    task.spawn(function()
+        S.vis = S.vis or {}
+        S.vis[tostring(game.JobId)] = true
+        MarkServerAnti(game.JobId, 600)
+
+        while S.Run and S.Hop do
+            Say("Đang quét server vắng (anti-trùng)...")
+            local blocked = GetBlockedJobs()
+            local rawList = FetchFullServers()
+            local pool = {}
+
+            -- Ưu tiên 1: Lọc server 1 đến 5 người, chưa bị chặn/trùng acc khác
+            for _, s in ipairs(rawList) do
+                if not blocked[s.id] and s.playing >= 1 and s.playing <= 5 and s.playing < s.max then
+                    table.insert(pool, s)
+                end
+            end
+
+            -- Dự phòng: Nếu không có server <= 5 người thì mở rộng lên <= 8 người
+            if #pool == 0 then
+                for _, s in ipairs(rawList) do
+                    if not blocked[s.id] and s.playing >= 1 and s.playing <= 8 and s.playing < s.max then
+                        table.insert(pool, s)
+                    end
+                end
+            end
+
+            if #pool == 0 then
+                Say("Không tìm thấy server vắng phù hợp, quét lại...")
+                S.vis = { [tostring(game.JobId)] = true }
+                task.wait(1.5)
+            else
+                -- Sắp xếp: Ưu tiên ít player nhất trước (1 -> 5), ping thấp hơn trước
+                table.sort(pool, function(a, b)
+                    if a.playing ~= b.playing then
+                        return a.playing < b.playing
+                    end
+                    return a.ping < b.ping
+                end)
+
+                for i = 1, math.min(#pool, 5) do
+                    if not S.Run or not S.Hop then break end
+                    local cand = pool[i]
+                    -- Đánh dấu trước vào anti_servers.json để acc khác không hop trùng cùng lúc
+                    MarkServerAnti(cand.id, 300)
+                    S.vis[cand.id] = true
+                    Say(("Hop low -> %s (%d người, ~%dms)"):format(cand.id:sub(1, 8), cand.playing, cand.ping))
+                    TeleportToJob(cand.id)
+                    task.wait(4.5)
+                end
+                task.wait(1)
+            end
+        end
+    end)
+end
+
 -- ============ haki acc ============
 local function HakiStep()
     if not Need(3) then return end
     local here
-    for _, e in ipairs(Entries()) do if e.job == game.JobId then here = e end end
+    for _, e in ipairs(Entries()) do if e.job == tostring(game.JobId) and e.cup then here = e end end
     if here then
         if PadsAll() then task.wait(1) if PadsAll() then return HopLow("Đủ 3 pad -> hop low nhường chỗ") end end
         for _, p in ipairs(PADS) do
@@ -363,7 +601,7 @@ local function HakiStep()
         return
     end
     for _, e in ipairs(Entries()) do
-        if not e.ready and not e.summoned then return Join(e.job) end
+        if e.cup and not e.ready and not e.summoned then return Join(e.job) end
     end
     Say("Chờ clone có cup...")
 end
@@ -371,7 +609,7 @@ end
 -- ============ clone ============
 local ch = { job = "" }
 local function Chest()
-    if ch.job ~= game.JobId then ch = { job = game.JobId, n = 0, t0 = os.clock(), seen = {} } end
+    if ch.job ~= tostring(game.JobId) then ch = { job = tostring(game.JobId), n = 0, t0 = os.clock(), seen = {} } end
     if ch.n >= 30 or os.clock() - ch.t0 > 60 then return HopLow(("Chest %d/30 / TTL 60s -> hop low"):format(ch.n)) end
     local r = Root()
     if not r then return end
@@ -472,10 +710,7 @@ local function CloneStep()
     local cup = Has("God's Chalice")
     local summoning = S.sumT and os.clock() - S.sumT < 40
     if cup or summoning then
-        if os.clock() - (S.wT or 0) > 5 then
-            S.wT = os.clock()
-            pcall(writefile, myFile, HS:JSONEncode({ job = game.JobId, t = os.time(), ready = PadsAll(), summoned = summoning and true or false }))
-        end
+        UpdatePresence()
         if summoning then Say("Đợi Rip Indra spawn...") return Wait(not nh) end
         local zn = false
         for _, pl in ipairs(Players:GetPlayers()) do if pl.Name:lower() == HAKI then zn = true end end
@@ -486,29 +721,26 @@ local function CloneStep()
                 pcall(function() local d = workspace.Map["Boat Castle"].Summoner.Detection firetouchinterest(r, d, 0) firetouchinterest(r, d, 1) end)
                 task.wait(1.5)
                 S.sumT = os.clock()
+                UpdatePresence()
             end
         else
             Wait(not nh)
         end
         return
     end
-    if S.hasFile then S.hasFile = false pcall(delfile, myFile) end
-    local here
+    local here = false
     for _, e in ipairs(Entries()) do
-        if e.job == game.JobId and e.name ~= LP.Name then here = true end
-    end
-    for _, e in ipairs(Entries()) do
-        if e.job == game.JobId then here = true end
+        if e.job == tostring(game.JobId) and e.cup then here = true end
     end
     if here then return Wait(not nh) end
     for _, e in ipairs(Entries()) do
-        if e.ready and not e.summoned then return Join(e.job) end
+        if e.cup and e.ready and not e.summoned then return Join(e.job) end
     end
     if NeedElite() then return Elite() end
     Chest()
 end
--- đánh dấu có file để xóa khi hết cup
-task.spawn(function() while S.Run do if Has("God's Chalice") then S.hasFile = true end task.wait(3) end end)
+-- Loop cập nhật presence định kỳ (heartbeat) cho anti chung sever
+task.spawn(function() while S.Run do pcall(UpdatePresence) task.wait(2.5) end end)
 
 -- ============ UI ============
 local gui = Instance.new("ScreenGui")

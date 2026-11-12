@@ -125,7 +125,7 @@ local function HasTool(pl, n)
         or (pl:FindFirstChild("Backpack") and pl.Backpack:FindFirstChild(n) ~= nil)
 end
 
--- ============ float / tween (speed 190) ============
+-- ============ float / tween (speed 190 + chống giật về vị trí cũ 5 lần) ============
 local curTw, conn
 local function Float(on)
     local r = Root()
@@ -159,11 +159,27 @@ local function Fly(pos, abort, desc)
     if not r or not h or h.Health <= 0 then return false end
     h.Sit = false
     Float(true)
-    local d = (r.Position - pos).Magnitude
-    if d > 15 then
+
+    local snapCount = 0
+    local snapPos = nil
+
+    while S.Run and not S.Hop do
+        r, h = Root()
+        if not r or not h or h.Health <= 0 or (abort and abort()) then return false end
+        local d = (r.Position - pos).Magnitude
+        if d <= 15 then
+            r.CFrame = CF(pos)
+            break
+        end
+
         local tw = TS:Create(r, TweenInfo.new(d / SPEED, Enum.EasingStyle.Linear), { CFrame = CF(pos) })
         curTw = tw
         tw:Play()
+
+        local lastDist = d
+        local checkT = os.clock()
+        local rubberbanded = false
+
         while S.Run and tw.PlaybackState == Enum.PlaybackState.Playing do
             task.wait(0.05)
             r, h = Root()
@@ -172,10 +188,47 @@ local function Fly(pos, abort, desc)
                 return false
             end
             r.AssemblyLinearVelocity = V3()
-            if desc then Say(("%s (%.0fm)"):format(desc, (r.Position - pos).Magnitude)) end
+            local curDist = (r.Position - pos).Magnitude
+            if desc then Say(("%s (%.0fm)"):format(desc, curDist)) end
+
+            -- Kiểm tra mỗi 0.22s xem nhân vật có bị giật ngược về vị trí verified spot không
+            if os.clock() - checkT >= 0.22 then
+                checkT = os.clock()
+                -- Nếu khoảng cách tới đích không giảm được (hoặc bị kéo lùi lại)
+                if curDist >= lastDist - 8 then
+                    if snapPos and (r.Position - snapPos).Magnitude < 45 then
+                        snapCount = snapCount + 1
+                    else
+                        snapPos = r.Position
+                        snapCount = 1
+                    end
+
+                    if snapCount >= 5 then
+                        tw:Cancel()
+                        Float(false)
+                        Say("Bị giật vị trí 5 lần -> Dừng 1s về Verified Spot...")
+                        task.wait(1)
+                        snapCount = 0
+                        snapPos = nil
+                        Float(true)
+                        rubberbanded = true
+                        break
+                    end
+                elseif curDist < lastDist - 25 then
+                    -- Đang bay tiến triển bình thường
+                    snapCount = 0
+                end
+                lastDist = curDist
+            end
         end
-        r = Root()
-        if S.Run and r then r.CFrame = CF(pos) end
+
+        if not rubberbanded then
+            r = Root()
+            if S.Run and r and (r.Position - pos).Magnitude <= 25 then
+                r.CFrame = CF(pos)
+            end
+            break
+        end
     end
     return S.Run
 end
@@ -454,7 +507,6 @@ end
 
 UpdatePresence()
 
--- Lấy danh sách các acc đang có cup từ file (ưu tiên acc ra cup sớm nhất)
 local function GetCupQueues()
     local cups = {}
     for _, e in ipairs(Entries()) do
@@ -472,7 +524,6 @@ local function GetCupQueues()
     return cups
 end
 
--- Kiểm tra server hiện tại có Cup hay không thông qua File (ai là người có cup)
 local function GetServerCupHolderFromFile()
     local myJob = tostring(game.JobId)
     local holders = {}
@@ -492,7 +543,6 @@ local function GetServerCupHolderFromFile()
     return #holders > 0, holders
 end
 
--- Kiểm tra tất cả acc Clone đang chạy script Indra đã vào hết server hiện tại chưa
 local function AllActiveClonesInServer()
     local myJob = tostring(game.JobId)
     local cloneCount = 0
@@ -509,7 +559,6 @@ local function AllActiveClonesInServer()
     return cloneCount > 0
 end
 
--- Kiểm tra trùng server: chỉ acc vào server SAU mới phải hop, acc vào trước ở lại farm
 local function CheckLateJoinerConflict()
     local myJob = tostring(game.JobId)
     local myJoin = tonumber(S.joinTime) or os.time()
@@ -831,70 +880,49 @@ local function HakiStep()
     Say("Đang chờ Clone nhặt được Cup...")
 end
 
--- ============ clone & auto chest ============
+-- ============ clone & auto chest (CHUẨN CƠ CHẾ NIGHT HUB nighmain.txt) ============
 local ch = { job = "" }
 
-local function IsValidChest(obj)
-    if not obj or not obj.Parent or not obj:IsDescendantOf(workspace) then return false end
-    if obj:GetAttribute("IsDisabled") == true then return false end
-    if ch.seen and ch.seen[obj] then return false end
-
-    local name = obj.Name
-    local validName = (name == "Chest1" or name == "Chest2" or name == "Chest3"
-        or name:match("^Chest%d?$") ~= nil or name:match("^Chest_%d+$") ~= nil
-        or CS:HasTag(obj, "_ChestTagged"))
-    if not validName then return false end
-
-    local charModel = obj:FindFirstAncestorOfClass("Model")
-    if charModel and (Players:GetPlayerFromCharacter(charModel) or charModel:FindFirstChildOfClass("Humanoid")) then
-        return false
-    end
-
-    if obj:IsA("BasePart") then
-        if obj.Transparency >= 0.8 then return false end
-    elseif obj:IsA("Model") then
-        local p = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-        if not p or p.Transparency >= 0.8 or p:GetAttribute("IsDisabled") == true then return false end
-    else
-        return false
-    end
-
-    return true
-end
-
+-- Hàm GetChest tham khảo trực tiếp từ nighmain.txt (dòng 1043-1059)
+-- Lưu ý: Không lọc Transparency >= 0.8 vì hitbox chứa TouchInterest của rương trong Blox Fruits vốn dĩ trong suốt!
 local function GetChest()
     local r = Root()
     if not r then return nil end
-    local best, bd = nil, math.huge
 
-    local function Check(obj)
-        if IsValidChest(obj) then
-            local ok, cf = pcall(function() return obj:GetPivot() end)
-            if ok and cf then
-                local d = (cf.Position - r.Position).Magnitude
-                if d < bd then best, bd = obj, d end
+    local tagged = CS:GetTagged("_ChestTagged")
+    local huge = math.huge
+    local best = nil
+
+    for i = 1, #tagged do
+        local obj = tagged[i]
+        if obj and obj.Parent and not obj:GetAttribute("IsDisabled") and not (ch.seen and ch.seen[obj]) then
+            local hasTouch = obj:FindFirstChild("TouchInterest") or obj:FindFirstChildWhichIsA("TouchTransmitter", true)
+            if hasTouch then
+                local ok, cf = pcall(function() return obj:GetPivot() end)
+                if ok and cf then
+                    local magnitude = (cf.Position - r.Position).Magnitude
+                    if magnitude <= huge then
+                        best = obj
+                        huge = magnitude
+                    end
+                end
             end
         end
     end
 
-    -- 1. Quét tag chuẩn của Blox Fruits
-    for _, c in ipairs(CS:GetTagged("_ChestTagged")) do Check(c) end
-
-    -- 2. Quét trong thư mục ChestModels (nếu có)
-    local cm = workspace:FindFirstChild("ChestModels")
-    if cm then
-        for _, c in ipairs(cm:GetChildren()) do Check(c) end
-    end
-
-    -- 3. Quét trực tiếp con của Workspace
-    for _, c in ipairs(workspace:GetChildren()) do Check(c) end
-
-    -- 4. Quét sâu trong Map nếu vẫn chưa thấy
-    local map = workspace:FindFirstChild("Map")
-    if not best and map then
-        for _, c in ipairs(map:GetDescendants()) do
-            if c.Name == "Chest1" or c.Name == "Chest2" or c.Name == "Chest3" then
-                Check(c)
+    -- Fallback nếu có rương trong tagged chưa có TouchInterest kịp (stream xa)
+    if not best then
+        for i = 1, #tagged do
+            local obj = tagged[i]
+            if obj and obj.Parent and not obj:GetAttribute("IsDisabled") and not (ch.seen and ch.seen[obj]) then
+                local ok, cf = pcall(function() return obj:GetPivot() end)
+                if ok and cf then
+                    local magnitude = (cf.Position - r.Position).Magnitude
+                    if magnitude <= huge then
+                        best = obj
+                        huge = magnitude
+                    end
+                end
             end
         end
     end
@@ -913,7 +941,7 @@ local function Chest()
         return HopLow("Trùng SV với " .. tostring(olderAcc))
     end
 
-    if ch.n >= 30 or os.clock() - ch.t0 > 75 then
+    if ch.n >= 30 or os.clock() - ch.t0 > 80 then
         return HopLow(("Đã nhặt %d/30 chest"):format(ch.n))
     end
 
@@ -922,11 +950,10 @@ local function Chest()
 
     local chest = GetChest()
     if not chest then
-        -- Chống lỗi vừa vào server map chưa kịp stream rương đã vội Hop
         ch.emptyRetries = (ch.emptyRetries or 0) + 1
         if ch.emptyRetries <= 8 then
-            Say(("Đang chờ tải rương (%d/8)..."):format(ch.emptyRetries))
-            task.wait(0.6)
+            Say(("Đang quét rương (%d/8)..."):format(ch.emptyRetries))
+            task.wait(0.5)
             return
         end
         return HopLow("Hết chest")
@@ -937,30 +964,40 @@ local function Chest()
     local dStart = (r.Position - targetPos).Magnitude
     Say(("Nhặt chest %d/30 (%.0fm)"):format(ch.n + 1, dStart))
 
-    Go(targetPos + V3(0, 1.5, 0), function()
+    -- Bay tới đúng tâm Pivot của rương giống AutoChestTween trong nighmain.txt
+    Go(targetPos, function()
         local lateNow = CheckLateJoinerConflict()
-        return lateNow or not IsValidChest(chest) or InBag("God's Chalice") ~= nil
+        return lateNow
+            or not chest.Parent
+            or chest:GetAttribute("IsDisabled") == true
+            or InBag("God's Chalice") ~= nil
     end, ("Bay tới chest %d/30"):format(ch.n + 1))
 
     r = Root()
-    if r and chest:IsDescendantOf(workspace) then
+    if r and chest and chest.Parent then
         local dist = (r.Position - chest:GetPivot().Position).Magnitude
-        if dist <= 18 then
+        if dist <= 15 then
+            local now2 = tick()
             local touchPart = chest:IsA("BasePart") and chest or (chest.PrimaryPart or chest:FindFirstChildWhichIsA("BasePart"))
-            if touchPart then
-                pcall(firetouchinterest, touchPart, r, 0)
-                pcall(firetouchinterest, touchPart, r, 1)
-                if firesignal and pcall(function() return touchPart.Touched end) then
-                    pcall(firesignal, touchPart.Touched, r)
+            while S.Run and chest and chest.Parent and not chest:GetAttribute("IsDisabled") and tick() - now2 < 1.1 do
+                r = Root()
+                if not r then break end
+                r.CFrame = chest:GetPivot()
+                pcall(firetouchinterest, chest, r, 0)
+                pcall(firetouchinterest, chest, r, 1)
+                if firesignal then pcall(firesignal, chest.Touched, r) end
+                if touchPart and touchPart ~= chest then
+                    pcall(firetouchinterest, touchPart, r, 0)
+                    pcall(firetouchinterest, touchPart, r, 1)
+                    if firesignal then pcall(firesignal, touchPart.Touched, r) end
                 end
-                task.wait(0.18)
-                pcall(firetouchinterest, touchPart, r, 0)
-                pcall(firetouchinterest, touchPart, r, 1)
-                pcall(function()
-                    chest:SetAttribute("IsDisabled", true)
-                    if touchPart ~= chest then touchPart:SetAttribute("IsDisabled", true) end
-                end)
+                task.wait(0.1)
             end
+            pcall(function()
+                if not chest:GetAttribute("IsDisabled") then
+                    chest:SetAttribute("IsDisabled", true)
+                end
+            end)
             ch.seen[chest] = true
             ch.n = ch.n + 1
         else
@@ -971,40 +1008,38 @@ local function Chest()
     end
 end
 
--- ============ elite (nhận quest trước -> có Elite thì đánh, không có thì đi nhặt Chest) ============
+-- ============ elite (ĐỦ 30/30 HOẶC CÓ YAMA THÌ BỎ QUA HOÀN TOÀN, TẬP TRUNG CHEST) ============
 local ELITE = { "diablo", "deandre", "urban" }
-local kT, kV, eT = 0, nil, 0
+local kT, kV, eT = 0, 0, 0
 
 local function Kills()
-    if os.clock() - kT > 3 then
+    if os.clock() - kT > 4 then
         kT = os.clock()
         local r = Inv("EliteHunter", "Progress")
-        kV = type(r) == "number" and r
+        local parsed = type(r) == "number" and r
             or type(r) == "string" and tonumber(r:match("%d+"))
             or type(r) == "table" and tonumber(r.Kills or r.Progress or r[1])
-            or kV
+        if parsed ~= nil then kV = parsed end
     end
-    return kV
+    return kV or 0
 end
 
 local function NeedElite()
     if Has("Yama") then return false end
-    local k = Kills()
-    return k ~= nil and k < 30
+    return Kills() < 30
 end
 
-local function EliteQuest()
-    local pg = LP:FindFirstChild("PlayerGui")
-    local t = pg and pg:FindFirstChild("TrackedQuestFrame")
-    local hd = t and t.Enabled and t:FindFirstChild("Frame") and t.Frame.Visible and t.Frame:FindFirstChild("header")
-    local tx = hd and hd:FindFirstChild("textLabel") and hd.textLabel.Text:lower() or ""
-    for _, p in ipairs(ELITE) do
-        if tx:find(p, 1, true) then return true end
-    end
-    return false
+local function CheckQuest(mobName)
+    local ok, res = pcall(function()
+        local quest = LP.PlayerGui.Main.Quest
+        if not quest.Visible then return false end
+        local title = quest.Container.QuestTitle.Title.Text:gsub("-", ""):lower()
+        return title:find(mobName:gsub("-", ""):lower(), 1, true) ~= nil
+    end)
+    return ok and res or false
 end
 
--- Trả về true nếu đang săn Elite trong server, false nếu server không có Elite (để chuyển sang nhặt Chest)
+-- Chỉ chạy khi NeedElite() == true (< 30/30). Nếu server không có Elite thì trả về false để đi nhặt Chest luôn.
 local function TryElite()
     local isLate, olderAcc = CheckLateJoinerConflict()
     if isLate then
@@ -1012,22 +1047,17 @@ local function TryElite()
         return true
     end
 
-    -- Bước 1: Gọi nhận quest EliteHunter trước để game spawn boss Elite nếu có
-    if not EliteQuest() and os.clock() - eT > 2.5 then
-        eT = os.clock()
-        pcall(Inv, "EliteHunter")
-        task.wait(0.25)
-    end
-
-    -- Bước 2: Tìm xem có boss Elite trong server không
     local m, _, _, live, pos = Find(ELITE)
-    if m and (live or (pos and pos.Magnitude > 50)) then
-        Say(("Đang săn Elite: %s (%s/30)"):format(m.Name, tostring(kV or "?")))
+    if m then
+        if not CheckQuest(m.Name) and os.clock() - eT > 1.5 then
+            eT = os.clock()
+            pcall(Inv, "EliteHunter")
+        end
+        Say(("Đang săn Elite: %s (%d/30)"):format(m.Name, Kills()))
         Boss(ELITE, pos)
         return true
     end
 
-    -- Server hiện tại không có Elite -> trả về false để đi farm Chest kiếm Cup (KHÔNG hop vội!)
     return false
 end
 
@@ -1064,7 +1094,6 @@ local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList)
 end
 
 local function CloneStep()
-    -- Đợi 2 giây đầu khi mới vào server để Inventory và Map kịp đồng bộ
     if os.clock() - (S.spawnClock or 0) < 2 then
         Say("Đang đồng bộ dữ liệu server...")
         return
@@ -1170,16 +1199,11 @@ local function CloneStep()
         return
     end
 
-    -- 5. ĐI KIẾM GOD'S CHALICE:
-    -- Nếu chưa đủ 30 Elite cho Yama (hoặc muốn săn Elite rơi Cup) -> kiểm tra Elite trước
+    -- 5. NẾU CHƯA ĐỦ 30 ELITE -> SĂN ELITE, NẾU ĐỦ 30/30 RỒI THÌ BỎ QUA ELITE VÀ TẬP TRUNG 100% CHEST
     if NeedElite() then
-        if TryElite() then return end
-    else
-        -- Kể cả khi đủ 30 kill Yama, vẫn thử nhận quest Elite vì giết Elite có tỉ lệ rơi God's Chalice
         if TryElite() then return end
     end
 
-    -- Nếu server hiện tại không có Elite -> Đi nhặt Chest kiếm God's Chalice!
     Chest()
 end
 
@@ -1203,7 +1227,7 @@ end)
 
 local f = Instance.new("Frame", gui)
 f.Size, f.Position, f.BackgroundColor3, f.BorderSizePixel, f.Active, f.Draggable =
-    UDim2.new(0, 310, 0, 170), UDim2.new(0, 12, 0.5, -85), Color3.fromRGB(20, 20, 26), 0, true, true
+    UDim2.new(0, 320, 0, 185), UDim2.new(0, 12, 0.5, -92), Color3.fromRGB(20, 20, 26), 0, true, true
 Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
 local sk = Instance.new("UIStroke", f)
 sk.Color = Color3.fromRGB(55, 55, 70)
@@ -1270,15 +1294,26 @@ task.spawn(function()
             cupStatusText = "<font color='#f87171'>KHÔNG</font>"
         end
 
+        local eliteKills = Kills()
+        local eliteColor = (eliteKills >= 30 or Has("Yama")) and "#4ade80" or "#facc15"
+        local eliteText = ("<font color='%s'><b>%d/30</b></font>%s"):format(
+            eliteColor,
+            eliteKills,
+            Has("Yama") and " (Có Yama)" or ""
+        )
+
         body.Text = (
             "Pad: %s\n" ..
             "Server Cup (File): %s\n" ..
+            "Elite: %s   |   Chest SV: <b>%d/30</b>\n" ..
             "Online Indra: <font color='#38bdf8'><b>%d acc</b></font> (Tại đây: <b>%d</b>)\n" ..
             "Players: <b>%d/12</b>   |   znwf: %s\n" ..
             "<font color='#9ca3af'>%s</font>"
         ):format(
             table.concat(pd, " | "),
             cupStatusText,
+            eliteText,
+            ch.n or 0,
             onlineCount,
             inThisServer,
             #Players:GetPlayers(),

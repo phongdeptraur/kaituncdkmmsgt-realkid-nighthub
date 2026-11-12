@@ -1,0 +1,539 @@
+-- AUTO INDRA (Haki acc + Clone accs) | tween speed 190 | smart portal | sync qua file IndraSync/
+repeat task.wait() until game:IsLoaded()
+local G = getgenv()
+if G._Indra then pcall(G._Indra.Stop) end
+local S = { Run = true, act = "Khởi tạo" }
+G._Indra = S
+
+local HAKI, SPEED, DIR = "znwfhkjbc", 190, "IndraSync"
+local function Svc(n) return game:GetService(n) end
+local Players, RS, TS, HS, CS, RunS = Svc "Players", Svc "ReplicatedStorage", Svc "TweenService", Svc "HttpService", Svc "CollectionService", Svc "RunService"
+local LP = Players.LocalPlayer
+local V3, CF = Vector3.new, CFrame.new
+local isHaki = LP.Name:lower() == HAKI
+pcall(makefolder, DIR)
+
+local P = {
+    Castle = V3(-5085.24, 314.52, -3156.28), Spot = V3(-4995.32, 314.55, -3008.93), Detect = V3(-5563.5, 312.4, -2662.6),
+    Hydra = V3(5404.4, 1006.8, 506.2), Torch = V3(5713.2, 41.9, 255.3), Longma = V3(-10238.88, 389.79, -9549.79),
+}
+local PADS = { { "Red", V3(-5414.4, 309.8, -2212.5), 287 }, { "Winter", V3(-5420.2, 1084.9, -2666.8), 292 }, { "Snow", V3(-4971.5, 331.5, -3720), 277 } }
+local PORTALS = { -- {A, B, requestEntrance A, requestEntrance B}
+    { V3(-5059.82, 326.79, -3192.29), V3(-12463.6, 386.62, -7566.08), V3(-5085.24, 314.55, -3156.2), V3(-12463.6, 374.91, -7550.23) },
+    { V3(-5027.03, 326.79, -3206.7), V3(5650.95, 1025.57, -350.38), V3(-5085.24, 314.55, -3156.2), V3(5661.53, 1013.36, -334.96) },
+}
+local EDGES = {}
+for _, p in ipairs(PORTALS) do
+    EDGES[#EDGES + 1] = { g = p[1], e = p[2], rq = p[4] }
+    EDGES[#EDGES + 1] = { g = p[2], e = p[1], rq = p[3] }
+end
+local INDRA = { "rip_indra" }
+
+-- ============ helpers ============
+local function Inv(...)
+    local r = RS:FindFirstChild("Remotes")
+    local c = (r and r:FindFirstChild("CommF_")) or RS:FindFirstChild("CommF_")
+    if c then local ok, res = pcall(c.InvokeServer, c, ...) if ok then return res end end
+end
+local function Root()
+    local c = LP.Character
+    return c and c:FindFirstChild("HumanoidRootPart"), c and c:FindFirstChildOfClass("Humanoid")
+end
+local function Say(a) if a then S.act = a end end
+local function Sea() return ({ [7449423635] = 3, [100117331123089] = 3 })[game.PlaceId] or 0 end
+local function Need(n)
+    if Sea() == n then return true end
+    Say("Đang chuyển Sea 3...") Inv("TravelZou") task.wait(5)
+end
+
+local inv, invT = {}, 0
+local function K(s) return (tostring(s or ""):gsub(" %[.-%]", ""):lower():gsub("%W", "")) end
+local function Items()
+    if os.clock() - invT > 3 then
+        invT = os.clock()
+        local n = {}
+        pcall(function()
+            local m = RS:WaitForChild("ItemReplicationService", 3)
+            local IR, KEYS, ID = require(m), require(m.KEYS), require(RS.Economy.ItemId)
+            local t0 = os.clock()
+            while not IR.IsInitialized and os.clock() - t0 < 5 do task.wait(0.2) end
+            for _, it in pairs(IR:GetItems(KEYS.QUANTITY)) do
+                if (tonumber(it.Value) or 0) > 0 then
+                    pcall(function()
+                        local d = ID.getDataFromId(it.ItemId):unwrap()
+                        for _, nm in ipairs({ d.StorageKey, d.DisplayName, d.Name }) do if nm then n[K(nm)] = true end end
+                    end)
+                end
+            end
+        end)
+        for _, i in pairs(Inv("getInventory") or {}) do if type(i) == "table" and i.Name then n[K(i.Name)] = true end end
+        if next(n) then inv = n end
+    end
+    return inv
+end
+local function InBag(n) local c = LP.Character return LP.Backpack:FindFirstChild(n) or (c and c:FindFirstChild(n)) end
+local function Has(n) return Items()[K(n)] or InBag(n) end
+local function HasTool(pl, n)
+    return (pl.Character and pl.Character:FindFirstChild(n)) or (pl:FindFirstChild("Backpack") and pl.Backpack:FindFirstChild(n))
+end
+
+-- ============ float / tween (speed 190) ============
+local curTw, conn
+local function Float(on)
+    local r = Root()
+    if not r then return end
+    local b = r:FindFirstChild("AxF")
+    if on then
+        if not b then b = Instance.new("BodyVelocity") b.Name, b.MaxForce, b.Velocity, b.Parent = "AxF", V3(1e9, 1e9, 1e9), V3(), r end
+    else
+        if b then b:Destroy() end
+        for _, p in ipairs(r.Parent:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = true end end
+    end
+    S.Fly = on
+end
+conn = RunS.Stepped:Connect(function()
+    if S.Fly and not S.Hop and LP.Character then
+        for _, p in ipairs(LP.Character:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end
+    end
+end)
+
+local function Fly(pos, abort, desc)
+    if not S.Run or S.Hop then return false end
+    local r, h = Root()
+    if not r or not h or h.Health <= 0 then return false end
+    h.Sit = false
+    Float(true)
+    local d = (r.Position - pos).Magnitude
+    if d > 15 then
+        local tw = TS:Create(r, TweenInfo.new(d / SPEED, Enum.EasingStyle.Linear), { CFrame = CF(pos) })
+        curTw = tw tw:Play()
+        while S.Run and tw.PlaybackState == Enum.PlaybackState.Playing do
+            task.wait(0.05)
+            r, h = Root()
+            if not r or not h or h.Health <= 0 or S.Hop or (abort and abort()) then tw:Cancel() return false end
+            r.AssemblyLinearVelocity = V3()
+            if desc then Say(("%s (%.0fm)"):format(desc, (r.Position - pos).Magnitude)) end
+        end
+        r = Root()
+        if S.Run and r then r.CFrame = CF(pos) end
+    end
+    return S.Run
+end
+
+-- Smart portal (cần Valkyrie Helm): chọn lộ trình 1-2 cổng nếu ngắn hơn đi thẳng
+local function Go(pos, abort, desc)
+    if not S.Run or S.Hop then return false end
+    for _ = 1, 2 do
+        local r = Root()
+        if not r or (abort and abort()) then return false end
+        local direct = (r.Position - pos).Magnitude
+        if direct < 1200 or Sea() ~= 3 or not Has("Valkyrie Helm") then break end
+        local best, bt = nil, direct - 600
+        for _, u in ipairs(EDGES) do
+            local d1 = (r.Position - u.g).Magnitude + (u.e - pos).Magnitude
+            if d1 < bt then best, bt = u, d1 end
+            for _, v in ipairs(EDGES) do
+                local d2 = (r.Position - u.g).Magnitude + (u.e - v.g).Magnitude + (v.e - pos).Magnitude
+                if d2 < bt then best, bt = u, d2 end
+            end
+        end
+        if not best then break end
+        if not Fly(best.g + V3(0, 2, 0), abort, "Vào cổng gần nhất") then return false end
+        for _ = 1, 5 do
+            local c = Root()
+            if not S.Run or not c or (c.Position - best.g).Magnitude > 250 then break end
+            Float(false)
+            c.CFrame = CF(best.g)
+            Inv("requestEntrance", best.rq)
+            Inv("requestEntrance", best.e)
+            task.wait(0.25)
+        end
+    end
+    return Fly(pos, abort, desc or "Đang di chuyển")
+end
+
+-- ============ combat (fast attack) ============
+local lastLoad = 0
+local function Equip(name)
+    local c = LP.Character
+    local h = c and c:FindFirstChildOfClass("Humanoid")
+    if not h then return end
+    if not c:FindFirstChild("HasBuso") then Inv("Buso") end
+    local t = c:FindFirstChildOfClass("Tool")
+    if name then
+        if t and t.Name == name then return t end
+        local b = LP.Backpack:FindFirstChild(name)
+        if not b and os.clock() - lastLoad > 1 then
+            lastLoad = os.clock() Inv("LoadItem", name) b = LP.Backpack:WaitForChild(name, 0.4)
+        end
+        if b then h:EquipTool(b) return b end
+    else
+        if t and (t.ToolTip == "Melee" or t.ToolTip == "Sword") then return t end
+        for _, i in ipairs(LP.Backpack:GetChildren()) do
+            if i:IsA("Tool") and (i.ToolTip == "Melee" or i.ToolTip == "Sword") then h:EquipTool(i) return i end
+        end
+    end
+    return t
+end
+local Net = RS:WaitForChild("Modules"):WaitForChild("Net")
+local _, NetM = pcall(require, Net)
+local ObfR, ObfId
+pcall(function()
+    for _, n in ipairs({ "Util", "Common", "Remotes", "Assets", "FX" }) do
+        local f = RS:FindFirstChild(n)
+        for _, c in ipairs(f and f:GetChildren() or {}) do
+            if c:IsA("RemoteEvent") and c:GetAttribute("Id") then ObfR, ObfId = c, c:GetAttribute("Id") return end
+        end
+    end
+end)
+local function Attack()
+    local c = LP.Character
+    local r = c and c:FindFirstChild("HumanoidRootPart")
+    if not r or S.Hop or S.noAttack then return end
+    local tool = Equip(S.weapon)
+    local hits, main = {}, nil
+    for _, cont in ipairs({ workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters") }) do
+        for _, m in ipairs(cont and cont:GetChildren() or {}) do
+            if m ~= c and m:IsA("Model") then
+                local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("Head")
+                if h and p and h.Health > 0 and (r.Position - p.Position).Magnitude <= (m == S.target and 120 or 75) then
+                    hits[#hits + 1], hits[#hits + 2] = { m, p }, m
+                    main = main or m:FindFirstChild("Head") or p
+                end
+            end
+        end
+    end
+    if not main then return end
+    pcall(function()
+        NetM:RemoteEvent("RegisterAttack", true):FireServer(0)
+        NetM:RemoteEvent("RegisterHit", true):FireServer(main, hits, {}, "078da5141")
+    end)
+    pcall(function()
+        Net["RE/RegisterAttack"]:FireServer()
+        Net["RE/RegisterHit"]:FireServer(main, hits, {}, tostring(LP.UserId):sub(2, 4) .. tostring(os.clock()):sub(3, 7))
+    end)
+    if ObfR then
+        pcall(function()
+            local k = string.gsub("RE/RegisterHit", ".", function(ch)
+                return string.char(bit32.bxor(string.byte(ch), math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1))
+            end)
+            ObfR:FireServer(k, bit32.bxor(ObfId + 909090, Net.seed:InvokeServer() * 2), main, hits)
+        end)
+    end
+    if tool then pcall(function() tool:Activate() end) end
+end
+task.spawn(function() while S.Run do pcall(Attack) task.wait() end end)
+
+local function MPos(m, r)
+    if r then return r.Position end
+    local ok, cf = pcall(function() return m:GetPivot() end)
+    return ok and cf and cf.Position or nil
+end
+local function Find(pats)
+    for _, c in ipairs({ workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters"), workspace, RS }) do
+        for _, m in ipairs(c and c:GetChildren() or {}) do
+            if m:IsA("Model") and not Players:GetPlayerFromCharacter(m) then
+                local n = m.Name:lower()
+                for _, p in ipairs(pats) do
+                    if n:find(p, 1, true) then
+                        local h = m:FindFirstChildOfClass("Humanoid")
+                        if not h or h.Health > 0 then
+                            local r = m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("Head") or m.PrimaryPart
+                            return m, r, h, (c ~= RS and r ~= nil and h ~= nil), MPos(m, r)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+local function Boss(pats, at)
+    local m, r, h, live, pos = Find(pats)
+    if not m then return false end
+    if live then
+        S.target = m
+        local me = Root()
+        local p = pos + V3(0, 18, 0)
+        if me and (me.Position - p).Magnitude > 25 then
+            Go(p, function() return not m.Parent or h.Health <= 0 end, "Đang bay tới đánh " .. m.Name)
+        elseif me then
+            Say(("Đang đánh %s (%d%%)"):format(m.Name, h.MaxHealth > 0 and h.Health / h.MaxHealth * 100 or 100))
+            Float(true) me.CFrame = CF(p, pos) me.AssemblyLinearVelocity = V3()
+        end
+    else
+        Go(pos or at, function() local _, _, _, lv = Find(pats) return lv end, "Đang bay tới " .. m.Name)
+    end
+    return true
+end
+
+-- ============ hop low (1-5 người) ============
+local function HopLow(why)
+    if S.Hop or not S.Run then return end
+    S.Hop = true Float(false) Say(why or "Hop low...")
+    task.spawn(function()
+        S.vis = S.vis or {}
+        S.vis[game.JobId] = true
+        local br = RS:WaitForChild("__ServerBrowser")
+        while S.Run do
+            local pool, done = {}, 0
+            for p = 1, 60 do
+                task.spawn(function()
+                    local ok, r = pcall(br.InvokeServer, br, p)
+                    if ok and type(r) == "table" then
+                        for id, d in pairs(r) do
+                            local c = (type(d) == "table" and tonumber(d.Count)) or tonumber(d) or 99
+                            if c >= 1 and c <= 5 and not S.vis[id] then pool[#pool + 1] = { id = tostring(id), c = c } end
+                        end
+                    end
+                    done += 1
+                end)
+            end
+            local t0 = os.clock()
+            repeat task.wait(0.05) until done >= 60 or os.clock() - t0 > 2.5
+            table.sort(pool, function(a, b) return a.c < b.c end)
+            for i = 1, math.min(#pool, 5) do
+                S.vis[pool[i].id] = true
+                Say(("Hop low -> %s (%d người)"):format(pool[i].id:sub(1, 8), pool[i].c))
+                pcall(br.InvokeServer, br, "teleport", pool[i].id)
+                task.wait(1.2)
+            end
+            if #pool == 0 then S.vis = { [game.JobId] = true } end
+            task.wait(0.4)
+        end
+    end)
+end
+local lastJoin = 0
+local function Join(job)
+    if os.clock() - lastJoin < 6 then return end
+    lastJoin = os.clock()
+    Say("Đang join server " .. job:sub(1, 8))
+    pcall(function() RS.__ServerBrowser:InvokeServer("teleport", job) end)
+end
+
+-- ============ sync (file) ============
+local function Entries()
+    local o = {}
+    local ok, fl = pcall(listfiles, DIR)
+    for _, f in ipairs(ok and fl or {}) do
+        local ok2, d = pcall(function() return HS:JSONDecode(readfile(f)) end)
+        if ok2 and type(d) == "table" and os.time() - (d.t or 0) < 30 then o[#o + 1] = d end
+    end
+    return o
+end
+local myFile = DIR .. "/" .. LP.Name .. ".json"
+
+-- ============ pads ============
+local function PadOpen(p)
+    local ok, r = pcall(function()
+        for _, d in ipairs(workspace.Map["Boat Castle"].Summoner.Circle:GetDescendants()) do
+            if d:IsA("BasePart") and (d.Position - p[2]).Magnitude < 12 then
+                local c = d.Color
+                if c.G > 0.9 and c.R < 0.1 and c.B < 0.1 then return true end
+            end
+        end
+        return false
+    end)
+    return ok and r or false
+end
+local function PadsAll() for _, p in ipairs(PADS) do if not PadOpen(p) then return false end end return true end
+local function Eq(id)
+    pcall(function() Net["RF/ModificationFunction"]:InvokeServer({ Type = "SetEquip", IsEquipped = true, ItemId = id }) end)
+end
+
+-- ============ haki acc ============
+local function HakiStep()
+    if not Need(3) then return end
+    local here
+    for _, e in ipairs(Entries()) do if e.job == game.JobId then here = e end end
+    if here then
+        if PadsAll() then task.wait(1) if PadsAll() then return HopLow("Đủ 3 pad -> hop low nhường chỗ") end end
+        for _, p in ipairs(PADS) do
+            if not PadOpen(p) then
+                Say("Đang mở pad " .. p[1])
+                Eq(p[3])
+                if Go(p[2] + V3(0, 3, 0), nil, "Tới pad " .. p[1]) then
+                    local r = Root()
+                    if r then Float(false) r.CFrame = CF(p[2] + V3(0, 3, 0)) end
+                    local t = os.clock()
+                    repeat Eq(p[3]) task.wait(0.4) until PadOpen(p) or os.clock() - t > 6 or not S.Run
+                end
+                return
+            end
+        end
+        return
+    end
+    for _, e in ipairs(Entries()) do
+        if not e.ready and not e.summoned then return Join(e.job) end
+    end
+    Say("Chờ clone có cup...")
+end
+
+-- ============ clone ============
+local ch = { job = "" }
+local function Chest()
+    if ch.job ~= game.JobId then ch = { job = game.JobId, n = 0, t0 = os.clock(), seen = {} } end
+    if ch.n >= 30 or os.clock() - ch.t0 > 60 then return HopLow(("Chest %d/30 / TTL 60s -> hop low"):format(ch.n)) end
+    local r = Root()
+    if not r then return end
+    for _, pl in ipairs(Players:GetPlayers()) do
+        local pr = pl ~= LP and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
+        if pr and (pr.Position - r.Position).Magnitude < 450 then return HopLow("Có " .. pl.Name .. " gần -> né server") end
+    end
+    local best, bd
+    for _, c in ipairs(CS:GetTagged("_ChestTagged")) do
+        if not ch.seen[c] and c:IsDescendantOf(workspace) then
+            local d = (c:GetPivot().Position - r.Position).Magnitude
+            if not bd or d < bd then best, bd = c, d end
+        end
+    end
+    if not best then return HopLow("Hết chest -> hop low") end
+    ch.seen[best] = true
+    if Go(best:GetPivot().Position, nil, ("Nhặt chest %d/30"):format(ch.n + 1)) then ch.n += 1 end
+end
+
+local dT, dV = 0, false
+local function Door()
+    if os.clock() - dT > 1 then
+        dT = os.clock()
+        local p = Inv("TushitaProgress")
+        if type(p) == "table" then dV = p.OpenedDoor == true end
+    end
+    return dV
+end
+
+local function Wait(helm)
+    local pos = helm and P.Hydra or P.Spot
+    local r = Root()
+    if r and (r.Position - pos).Magnitude > 20 then Go(pos, function() return Find(INDRA) end, helm and "Pre-tween Hydra" or "Chờ tại Castle") else Say("Đang chờ đủ 12 người / Indra spawn") end
+end
+
+local function CloneStep()
+    local nh, nt = not Has("Valkyrie Helm"), not Has("Tushita")
+    if not (nh or nt) then Say("HOÀN TẤT") return end
+    if not Need(3) then return end
+    if nt and Door() then -- cửa mở: bỏ qua Indra, đi giết Longma
+        S.weapon = nil
+        if not Boss({ "longma" }, P.Longma) then
+            local r = Root()
+            if r and (r.Position - P.Longma).Magnitude > 60 then Go(P.Longma, function() return Find({ "longma" }) end, "Đang tới hang Longma")
+            else HopLow("Không có Longma -> hop low") end
+        end
+        return
+    end
+    if Find(INDRA) then
+        if nh then Boss(INDRA, P.Castle)
+        elseif InBag("Holy Torch") then
+            Say("Thắp 5 đuốc Tushita") for i = 1, 5 do Inv("TushitaProgress", "Torch", i) task.wait(0.2) end
+        else
+            Go(P.Torch, nil, "Đi lấy Holy Torch")
+            local r = Root()
+            if r then Float(false) r.CFrame = CF(P.Torch) task.wait(1) end
+        end
+        return
+    end
+    local cup = Has("God's Chalice")
+    local summoning = S.sumT and os.clock() - S.sumT < 40
+    if cup or summoning then
+        if os.clock() - (S.wT or 0) > 5 then
+            S.wT = os.clock()
+            pcall(writefile, myFile, HS:JSONEncode({ job = game.JobId, t = os.time(), ready = PadsAll(), summoned = summoning and true or false }))
+        end
+        if summoning then Say("Đợi Rip Indra spawn...") return Wait(not nh) end
+        local zn = false
+        for _, pl in ipairs(Players:GetPlayers()) do if pl.Name:lower() == HAKI then zn = true end end
+        if PadsAll() and #Players:GetPlayers() >= 12 and not zn then
+            Equip("God's Chalice")
+            if Go(P.Detect, nil, "Tới summon Indra") then
+                local r = Root()
+                pcall(function() local d = workspace.Map["Boat Castle"].Summoner.Detection firetouchinterest(r, d, 0) firetouchinterest(r, d, 1) end)
+                task.wait(1.5)
+                S.sumT = os.clock()
+            end
+        else
+            Wait(not nh)
+        end
+        return
+    end
+    if S.hasFile then S.hasFile = false pcall(delfile, myFile) end
+    local here
+    for _, e in ipairs(Entries()) do
+        if e.job == game.JobId and e.name ~= LP.Name then here = true end
+    end
+    for _, e in ipairs(Entries()) do
+        if e.job == game.JobId then here = true end
+    end
+    if here then return Wait(not nh) end
+    for _, e in ipairs(Entries()) do
+        if e.ready and not e.summoned then return Join(e.job) end
+    end
+    Chest()
+end
+-- đánh dấu có file để xóa khi hết cup
+task.spawn(function() while S.Run do if Has("God's Chalice") then S.hasFile = true end task.wait(3) end end)
+
+-- ============ UI ============
+local gui = Instance.new("ScreenGui")
+gui.Name, gui.ResetOnSpawn = "IndraGui", false
+pcall(function() gui.Parent = (typeof(gethui) == "function" and gethui()) or Svc "CoreGui" end)
+local f = Instance.new("Frame", gui)
+f.Size, f.Position, f.BackgroundColor3, f.BorderSizePixel, f.Active, f.Draggable = UDim2.new(0, 290, 0, 150), UDim2.new(0, 12, 0.5, -75), Color3.fromRGB(20, 20, 26), 0, true, true
+Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
+local sk = Instance.new("UIStroke", f) sk.Color = Color3.fromRGB(55, 55, 70)
+local function Lbl(parent, sz, pos, txt, size, font)
+    local l = Instance.new("TextLabel", parent)
+    l.Size, l.Position, l.Text, l.TextSize, l.Font = sz, pos, txt, size, font
+    l.BackgroundTransparency, l.TextColor3, l.TextXAlignment, l.TextYAlignment, l.RichText = 1, Color3.fromRGB(225, 225, 235), Enum.TextXAlignment.Left, Enum.TextYAlignment.Top, true
+    return l
+end
+Lbl(f, UDim2.new(1, -40, 0, 24), UDim2.new(0, 10, 0, 4), "AUTO INDRA  |  " .. (isHaki and "HAKI" or "CLONE"), 13, Enum.Font.GothamBold)
+local body = Lbl(f, UDim2.new(1, -20, 1, -34), UDim2.new(0, 10, 0, 30), "", 12, Enum.Font.Gotham)
+local x = Instance.new("TextButton", f)
+x.Size, x.Position, x.Text, x.Font, x.TextSize = UDim2.new(0, 24, 0, 24), UDim2.new(1, -30, 0, 4), "X", Enum.Font.GothamBold, 12
+x.BackgroundColor3, x.TextColor3 = Color3.fromRGB(190, 45, 45), Color3.new(1, 1, 1)
+Instance.new("UICorner", x).CornerRadius = UDim.new(0, 5)
+
+local function Unload()
+    if not S.Run then return end
+    S.Run = false
+    if curTw then pcall(function() curTw:Cancel() end) end
+    pcall(function() conn:Disconnect() end)
+    pcall(Float, false)
+    pcall(delfile, myFile)
+    pcall(function() gui:Destroy() end)
+    if G._Indra == S then G._Indra = nil end
+end
+S.Stop = Unload
+x.MouseButton1Click:Connect(Unload)
+
+task.spawn(function()
+    while S.Run do
+        local pd, holders, zn = {}, {}, false
+        for _, p in ipairs(PADS) do
+            pd[#pd + 1] = ("<font color='%s'>%s</font>"):format(PadOpen(p) and "#4ade80" or "#f87171", p[1])
+        end
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl.Name:lower() == HAKI then zn = true end
+            if HasTool(pl, "God's Chalice") then holders[#holders + 1] = pl.Name end
+        end
+        body.Text = ("Pad: %s\nCup: %s\nPlayers: <b>%d/12</b>   znwf: %s\n<font color='#9ca3af'>%s</font>"):format(
+            table.concat(pd, " | "), #holders > 0 and table.concat(holders, ", ") or "-", #Players:GetPlayers(),
+            zn and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>KHÔNG</font>", tostring(S.act))
+        task.wait(0.5)
+    end
+end)
+
+-- ============ main ============
+task.spawn(function()
+    while S.Run and not (LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")) do
+        if not LP.Team then Inv("SetTeam2", "Marines") end
+        task.wait(0.15)
+    end
+    while S.Run do
+        if not S.Hop then
+            S.weapon, S.noAttack, S.target = nil, false, nil
+            local ok, e = pcall(isHaki and HakiStep or CloneStep)
+            if not ok then warn("[Indra]", e) end
+        end
+        task.wait(0.1)
+    end
+end)

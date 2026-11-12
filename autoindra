@@ -2,25 +2,40 @@
 repeat task.wait() until game:IsLoaded()
 local G = getgenv()
 if G._Indra and G._Indra.Run then pcall(G._Indra.Stop) task.wait(0.3) end
-local S = { Run = true, Done = false, act = "Khởi tạo" }
+
+local S = {
+    Run = true,
+    Done = false,
+    act = "Khởi tạo",
+    joinTime = os.time(),
+    lastJob = tostring(game.JobId)
+}
 G._Indra = S
 
 local HAKI, SPEED, DIR = "znwfhkjbc", 190, "IndraSync"
 local function Svc(n) return game:GetService(n) end
-local Players, RS, TS, HS, CS, RunS = Svc "Players", Svc "ReplicatedStorage", Svc "TweenService", Svc "HttpService", Svc "CollectionService", Svc "RunService"
+local Players, RS, TS, HS, CS, RunS, TelS = Svc("Players"), Svc("ReplicatedStorage"), Svc("TweenService"), Svc("HttpService"), Svc("CollectionService"), Svc("RunService"), Svc("TeleportService")
 local LP = Players.LocalPlayer
 local V3, CF = Vector3.new, CFrame.new
 local isHaki = LP.Name:lower() == HAKI
 pcall(makefolder, DIR)
 
 local P = {
-    Castle = V3(-5085.24, 314.52, -3156.28), Spot = V3(-4995.32, 314.55, -3008.93), Detect = V3(-5563.5, 312.4, -2662.6),
-    Hydra = V3(5404.4, 1006.8, 506.2), Torch = V3(5713.2, 41.9, 255.3), Longma = V3(-10238.88, 389.79, -9549.79),
+    Castle = V3(-5085.24, 314.52, -3156.28),
+    Spot   = V3(-4995.32, 314.55, -3008.93),
+    Detect = V3(-5563.5, 312.4, -2662.6),
+    Hydra  = V3(5404.4, 1006.8, 506.2),
+    Torch  = V3(5713.2, 41.9, 255.3),
+    Longma = V3(-10238.88, 389.79, -9549.79),
 }
-local PADS = { { "Red", V3(-5414.4, 309.8, -2212.5), 287 }, { "Winter", V3(-5420.2, 1084.9, -2666.8), 292 }, { "Snow", V3(-4971.5, 331.5, -3720), 277 } }
-local PORTALS = { -- {A, B, requestEntrance A, requestEntrance B}
+local PADS = {
+    { "Red",    V3(-5414.4, 309.8, -2212.5), 287 },
+    { "Winter", V3(-5420.2, 1084.9, -2666.8), 292 },
+    { "Snow",   V3(-4971.5, 331.5, -3720),   277 }
+}
+local PORTALS = {
     { V3(-5059.82, 326.79, -3192.29), V3(-12463.6, 386.62, -7566.08), V3(-5085.24, 314.55, -3156.2), V3(-12463.6, 374.91, -7550.23) },
-    { V3(-5027.03, 326.79, -3206.7), V3(5650.95, 1025.57, -350.38), V3(-5085.24, 314.55, -3156.2), V3(5661.53, 1013.36, -334.96) },
+    { V3(-5027.03, 326.79, -3206.7),  V3(5650.95, 1025.57, -350.38),  V3(-5085.24, 314.55, -3156.2), V3(5661.53, 1013.36, -334.96) },
 }
 local EDGES = {}
 for _, p in ipairs(PORTALS) do
@@ -33,21 +48,35 @@ local INDRA = { "rip_indra" }
 local function Inv(...)
     local r = RS:FindFirstChild("Remotes")
     local c = (r and r:FindFirstChild("CommF_")) or RS:FindFirstChild("CommF_")
-    if c then local ok, res = pcall(c.InvokeServer, c, ...) if ok then return res end end
+    if c then
+        local ok, res = pcall(c.InvokeServer, c, ...)
+        if ok then return res end
+    end
 end
+
 local function Root()
     local c = LP.Character
     return c and c:FindFirstChild("HumanoidRootPart"), c and c:FindFirstChildOfClass("Humanoid")
 end
-local function Say(a) if a then S.act = a end end
-local function Sea() return ({ [7449423635] = 3, [100117331123089] = 3 })[game.PlaceId] or 0 end
+
+local function Say(a)
+    if a then S.act = a end
+end
+
+local function Sea()
+    return ({ [7449423635] = 3, [100117331123089] = 3 })[game.PlaceId] or 0
+end
+
 local function Need(n)
     if Sea() == n then return true end
-    Say("Đang chuyển Sea 3...") Inv("TravelZou") task.wait(5)
+    Say("Đang chuyển Sea 3...")
+    Inv("TravelZou")
+    task.wait(5)
 end
 
 local inv, invT = {}, 0
 local function K(s) return (tostring(s or ""):gsub(" %[.-%]", ""):lower():gsub("%W", "")) end
+
 local function Items()
     if os.clock() - invT > 3 then
         invT = os.clock()
@@ -61,20 +90,39 @@ local function Items()
                 if (tonumber(it.Value) or 0) > 0 then
                     pcall(function()
                         local d = ID.getDataFromId(it.ItemId):unwrap()
-                        for _, nm in ipairs({ d.StorageKey, d.DisplayName, d.Name }) do if nm then n[K(nm)] = true end end
+                        for _, nm in ipairs({ d.StorageKey, d.DisplayName, d.Name }) do
+                            if nm then n[K(nm)] = true end
+                        end
                     end)
                 end
             end
         end)
-        for _, i in pairs(Inv("getInventory") or {}) do if type(i) == "table" and i.Name then n[K(i.Name)] = true end end
+        for _, i in pairs(Inv("getInventory") or {}) do
+            if type(i) == "table" and i.Name then n[K(i.Name)] = true end
+        end
         if next(n) then inv = n end
     end
     return inv
 end
-local function InBag(n) local c = LP.Character return LP.Backpack:FindFirstChild(n) or (c and c:FindFirstChild(n)) end
-local function Has(n) return Items()[K(n)] or InBag(n) end
+
+local function InBag(n)
+    local c = LP.Character
+    local bp = LP:FindFirstChild("Backpack")
+    return (bp and bp:FindFirstChild(n)) or (c and c:FindFirstChild(n))
+end
+
+-- Lưu ý: God's Chalice và Holy Torch là Tool rơi trực tiếp vào túi đồ, chỉ check InBag để tránh cache ảo
+local function Has(n)
+    if n == "God's Chalice" or n == "Holy Torch" then
+        return InBag(n) ~= nil
+    end
+    return Items()[K(n)] or (InBag(n) ~= nil)
+end
+
 local function HasTool(pl, n)
-    return (pl.Character and pl.Character:FindFirstChild(n)) or (pl:FindFirstChild("Backpack") and pl.Backpack:FindFirstChild(n))
+    if not pl then return false end
+    return (pl.Character and pl.Character:FindFirstChild(n) ~= nil)
+        or (pl:FindFirstChild("Backpack") and pl.Backpack:FindFirstChild(n) ~= nil)
 end
 
 -- ============ float / tween (speed 190) ============
@@ -84,16 +132,24 @@ local function Float(on)
     if not r then return end
     local b = r:FindFirstChild("AxF")
     if on then
-        if not b then b = Instance.new("BodyVelocity") b.Name, b.MaxForce, b.Velocity, b.Parent = "AxF", V3(1e9, 1e9, 1e9), V3(), r end
+        if not b then
+            b = Instance.new("BodyVelocity")
+            b.Name, b.MaxForce, b.Velocity, b.Parent = "AxF", V3(1e9, 1e9, 1e9), V3(), r
+        end
     else
         if b then b:Destroy() end
-        for _, p in ipairs(r.Parent:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = true end end
+        for _, p in ipairs(r.Parent:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = true end
+        end
     end
     S.Fly = on
 end
+
 conn = RunS.Stepped:Connect(function()
     if S.Fly and not S.Hop and LP.Character then
-        for _, p in ipairs(LP.Character:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end
+        for _, p in ipairs(LP.Character:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = false end
+        end
     end
 end)
 
@@ -106,11 +162,15 @@ local function Fly(pos, abort, desc)
     local d = (r.Position - pos).Magnitude
     if d > 15 then
         local tw = TS:Create(r, TweenInfo.new(d / SPEED, Enum.EasingStyle.Linear), { CFrame = CF(pos) })
-        curTw = tw tw:Play()
+        curTw = tw
+        tw:Play()
         while S.Run and tw.PlaybackState == Enum.PlaybackState.Playing do
             task.wait(0.05)
             r, h = Root()
-            if not r or not h or h.Health <= 0 or S.Hop or (abort and abort()) then tw:Cancel() return false end
+            if not r or not h or h.Health <= 0 or S.Hop or (abort and abort()) then
+                tw:Cancel()
+                return false
+            end
             r.AssemblyLinearVelocity = V3()
             if desc then Say(("%s (%.0fm)"):format(desc, (r.Position - pos).Magnitude)) end
         end
@@ -120,7 +180,6 @@ local function Fly(pos, abort, desc)
     return S.Run
 end
 
--- Smart portal (cần Valkyrie Helm): chọn lộ trình 1-2 cổng nếu ngắn hơn đi thẳng
 local function Go(pos, abort, desc)
     if not S.Run or S.Hop then return false end
     for _ = 1, 2 do
@@ -164,17 +223,23 @@ local function Equip(name)
         if t and t.Name == name then return t end
         local b = LP.Backpack:FindFirstChild(name)
         if not b and os.clock() - lastLoad > 1 then
-            lastLoad = os.clock() Inv("LoadItem", name) b = LP.Backpack:WaitForChild(name, 0.4)
+            lastLoad = os.clock()
+            Inv("LoadItem", name)
+            b = LP.Backpack:WaitForChild(name, 0.4)
         end
         if b then h:EquipTool(b) return b end
     else
         if t and (t.ToolTip == "Melee" or t.ToolTip == "Sword") then return t end
         for _, i in ipairs(LP.Backpack:GetChildren()) do
-            if i:IsA("Tool") and (i.ToolTip == "Melee" or i.ToolTip == "Sword") then h:EquipTool(i) return i end
+            if i:IsA("Tool") and (i.ToolTip == "Melee" or i.ToolTip == "Sword") then
+                h:EquipTool(i)
+                return i
+            end
         end
     end
     return t
 end
+
 local Net = RS:WaitForChild("Modules"):WaitForChild("Net")
 local _, NetM = pcall(require, Net)
 local ObfR, ObfId
@@ -182,10 +247,14 @@ pcall(function()
     for _, n in ipairs({ "Util", "Common", "Remotes", "Assets", "FX" }) do
         local f = RS:FindFirstChild(n)
         for _, c in ipairs(f and f:GetChildren() or {}) do
-            if c:IsA("RemoteEvent") and c:GetAttribute("Id") then ObfR, ObfId = c, c:GetAttribute("Id") return end
+            if c:IsA("RemoteEvent") and c:GetAttribute("Id") then
+                ObfR, ObfId = c, c:GetAttribute("Id")
+                return
+            end
         end
     end
 end)
+
 local function Attack()
     local c = LP.Character
     local r = c and c:FindFirstChild("HumanoidRootPart")
@@ -229,6 +298,7 @@ local function MPos(m, r)
     local ok, cf = pcall(function() return m:GetPivot() end)
     return ok and cf and cf.Position or nil
 end
+
 local function Find(pats)
     for _, c in ipairs({ workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters"), workspace, RS }) do
         for _, m in ipairs(c and c:GetChildren() or {}) do
@@ -247,6 +317,7 @@ local function Find(pats)
         end
     end
 end
+
 local function Boss(pats, at)
     local m, r, h, live, pos = Find(pats)
     if not m then return false end
@@ -258,7 +329,9 @@ local function Boss(pats, at)
             Go(p, function() return not m.Parent or h.Health <= 0 end, "Đang bay tới đánh " .. m.Name)
         elseif me then
             Say(("Đang đánh %s (%d%%)"):format(m.Name, h.MaxHealth > 0 and h.Health / h.MaxHealth * 100 or 100))
-            Float(true) me.CFrame = CF(p, pos) me.AssemblyLinearVelocity = V3()
+            Float(true)
+            me.CFrame = CF(p, pos)
+            me.AssemblyLinearVelocity = V3()
         end
     else
         Go(pos or at, function() local _, _, _, lv = Find(pats) return lv end, "Đang bay tới " .. m.Name)
@@ -266,7 +339,7 @@ local function Boss(pats, at)
     return true
 end
 
--- ============ anti chung sever & sync (file) ============
+-- ============ file sync (5s heartbeat, 60s offline) & anti trùng server ============
 local ANTI_FILE = DIR .. "/anti_servers.json"
 local myFile = DIR .. "/" .. LP.Name .. ".json"
 
@@ -276,9 +349,7 @@ local function GetAntiServers()
         if isfile and isfile(ANTI_FILE) then
             local raw = readfile(ANTI_FILE)
             local ok, data = pcall(function() return HS:JSONDecode(raw) end)
-            if ok and type(data) == "table" then
-                list = data
-            end
+            if ok and type(data) == "table" then list = data end
         end
     end)
     local now = os.time()
@@ -301,6 +372,7 @@ local function MarkServerAnti(jobId, durationSeconds)
     end)
 end
 
+-- Đọc danh sách các acc đang online (cập nhật trong vòng 60s)
 local function Entries()
     local o = {}
     local ok, fl = pcall(listfiles, DIR)
@@ -311,12 +383,12 @@ local function Entries()
             local ok2, raw = pcall(readfile, f)
             if ok2 and raw and raw ~= "" then
                 local ok3, d = pcall(function() return HS:JSONDecode(raw) end)
-                if ok3 and type(d) == "table" then
+                if ok3 and type(d) == "table" and d.name then
                     local age = now - (tonumber(d.t) or 0)
-                    -- Cho phép chênh lệch do clock skew (-120s đến 45s)
-                    if age >= -120 and age < 45 then
+                    -- 60s không cập nhật tức là offline
+                    if age >= -120 and age <= 60 then
                         o[#o + 1] = d
-                    elseif age > 300 then
+                    elseif age > 60 then
                         pcall(delfile, f)
                     end
                 end
@@ -324,22 +396,6 @@ local function Entries()
         end
     end
     return o
-end
-
--- Lấy danh sách các acc đang có cup (được sắp xếp theo acc ra cup sớm nhất)
-local function GetCupQueues()
-    local cups = {}
-    for _, e in ipairs(Entries()) do
-        if e.cup and not e.summoned and e.job and e.job ~= "" then
-            table.insert(cups, e)
-        end
-    end
-    table.sort(cups, function(a, b)
-        local ta = tonumber(a.cupTime) or tonumber(a.t) or 0
-        local tb = tonumber(b.cupTime) or tonumber(b.t) or 0
-        return ta < tb
-    end)
-    return cups
 end
 
 local function PadOpen(p)
@@ -354,13 +410,28 @@ local function PadOpen(p)
     end)
     return ok and r or false
 end
-local function PadsAll() for _, p in ipairs(PADS) do if not PadOpen(p) then return false end end return true end
+
+local function PadsAll()
+    for _, p in ipairs(PADS) do
+        if not PadOpen(p) then return false end
+    end
+    return true
+end
+
 local function Eq(id)
-    pcall(function() Net["RF/ModificationFunction"]:InvokeServer({ Type = "SetEquip", IsEquipped = true, ItemId = id }) end)
+    pcall(function()
+        Net["RF/ModificationFunction"]:InvokeServer({ Type = "SetEquip", IsEquipped = true, ItemId = id })
+    end)
 end
 
 local function UpdatePresence()
-    local cup = Has("God's Chalice")
+    local curJob = tostring(game.JobId)
+    if S.lastJob ~= curJob then
+        S.lastJob = curJob
+        S.joinTime = os.time()
+    end
+
+    local cup = InBag("God's Chalice") ~= nil
     if cup and not S.cupTime then
         S.cupTime = os.time()
     elseif not cup then
@@ -369,72 +440,130 @@ local function UpdatePresence()
 
     local data = {
         name = LP.Name,
-        job = tostring(game.JobId),
+        job = curJob,
         t = os.time(),
+        joinTime = S.joinTime or os.time(),
         cupTime = S.cupTime or os.time(),
         isHaki = isHaki,
-        cup = cup and true or false,
+        cup = cup,
         ready = PadsAll(),
-        summoned = (S.sumT and (os.clock() - S.sumT < 40)) and true or false
+        summoned = (S.sumT and (os.clock() - S.sumT < 35)) and true or false
     }
     pcall(writefile, myFile, HS:JSONEncode(data))
 end
 
--- Ghi nhận server hiện tại vào anti chung server ngay khi script khởi chạy
-MarkServerAnti(game.JobId, 600)
+-- Khởi tạo presence ngay khi bật script
 UpdatePresence()
+
+-- Lấy danh sách các acc đang có cup từ file (ưu tiên acc ra cup sớm nhất)
+local function GetCupQueues()
+    local cups = {}
+    for _, e in ipairs(Entries()) do
+        if e.cup and not e.summoned and e.job and e.job ~= "" then
+            -- Nếu là cùng server hiện tại, xác thực người đó thực sự đang ở trong server để tránh file ảo
+            if e.job ~= tostring(game.JobId) or Players:FindFirstChild(e.name) then
+                table.insert(cups, e)
+            end
+        end
+    end
+    table.sort(cups, function(a, b)
+        local ta = tonumber(a.cupTime) or tonumber(a.t) or 0
+        local tb = tonumber(b.cupTime) or tonumber(b.t) or 0
+        return ta < tb
+    end)
+    return cups
+end
+
+-- Kiểm tra server hiện tại có Cup hay không thông qua File (ai là người có cup)
+local function GetServerCupHolderFromFile()
+    local myJob = tostring(game.JobId)
+    local holders = {}
+
+    if InBag("God's Chalice") or (S.sumT and (os.clock() - S.sumT < 35)) then
+        table.insert(holders, LP.Name)
+    end
+
+    for _, e in ipairs(Entries()) do
+        if e.name ~= LP.Name and e.job == myJob and (e.cup or e.summoned) then
+            local pl = Players:FindFirstChild(e.name)
+            -- Người có cup trong file phải đang có mặt ở server này
+            if pl then
+                table.insert(holders, e.name)
+            end
+        end
+    end
+
+    return #holders > 0, holders
+end
+
+-- Kiểm tra tất cả acc Clone đang chạy script Indra đã vào hết server hiện tại chưa
+local function AllActiveClonesInServer()
+    local myJob = tostring(game.JobId)
+    local cloneCount = 0
+    for _, e in ipairs(Entries()) do
+        if not e.isHaki then
+            -- Bỏ qua acc đang bận giữ cup ở một server khác
+            if not (e.cup and e.job ~= myJob) then
+                cloneCount = cloneCount + 1
+                if e.job ~= myJob or not Players:FindFirstChild(e.name) then
+                    return false
+                end
+            end
+        end
+    end
+    return cloneCount > 0
+end
+
+-- Kiểm tra trùng server: chỉ acc vào server SAU mới phải hop, acc vào trước ở lại farm
+local function CheckLateJoinerConflict()
+    local myJob = tostring(game.JobId)
+    local myJoin = tonumber(S.joinTime) or os.time()
+
+    for _, e in ipairs(Entries()) do
+        if e.name ~= LP.Name and not e.isHaki and e.job == myJob and Players:FindFirstChild(e.name) then
+            local otherJoin = tonumber(e.joinTime) or 0
+            if myJoin > otherJoin or (myJoin == otherJoin and LP.Name > e.name) then
+                return true, e.name
+            end
+        end
+    end
+    return false, nil
+end
 
 local function GetBlockedJobs()
     local blocked = {}
     local myJob = tostring(game.JobId)
     blocked[myJob] = true
 
-    -- 1. Anti servers file (chung giữa tất cả acc)
     local anti = GetAntiServers()
     for jid, _ in pairs(anti) do
         blocked[tostring(jid)] = true
     end
 
-    -- 2. Quét toàn bộ acc đang active trong folder sync (né tuyệt đối server acc khác đang đứng)
     for _, e in ipairs(Entries()) do
         if e.name ~= LP.Name and e.job and e.job ~= "" then
             blocked[tostring(e.job)] = true
         end
     end
 
-    -- 3. Cache visited của session này
     if S.vis then
         for jid, _ in pairs(S.vis) do
             blocked[tostring(jid)] = true
         end
     end
 
-    -- 4. Check file visited của CDKProgress nếu có
-    pcall(function()
-        if isfile and isfile("CDKProgress/visited.json") then
-            local raw = readfile("CDKProgress/visited.json")
-            local ok, dt = pcall(function() return HS:JSONDecode(raw) end)
-            if ok and type(dt) == "table" then
-                local now = os.time()
-                for jid, v in pairs(dt) do
-                    if type(v) == "number" and (now - v < 300) then
-                        blocked[tostring(jid)] = true
-                    end
-                end
-            end
-        end
-    end)
-
     return blocked
 end
 
--- ============ teleport / join (bắt buộc dùng __ServerBrowser InvokeServer) ============
+-- ============ teleport / join (chuẩn __ServerBrowser) ============
 local function TeleportToJob(JOB_ID)
     if JOB_ID and JOB_ID ~= "" and JOB_ID ~= tostring(game.JobId) then
         pcall(function()
-            local browser = RS:FindFirstChild("__ServerBrowser") or game:GetService("ReplicatedStorage"):WaitForChild("__ServerBrowser", 3)
+            local browser = RS:FindFirstChild("__ServerBrowser") or RS:WaitForChild("__ServerBrowser", 3)
             if browser then
                 browser:InvokeServer("teleport", JOB_ID)
+            else
+                TelS:TeleportToPlaceInstance(game.PlaceId, JOB_ID, LP)
             end
         end)
     end
@@ -443,24 +572,24 @@ end
 local lastJoin = 0
 local function Join(job)
     if not job or job == "" or job == tostring(game.JobId) then return end
-    if os.clock() - lastJoin < 5 then return end
+    if os.clock() - lastJoin < 4 then return end
     lastJoin = os.clock()
     Say("Đang join server " .. tostring(job):sub(1, 8))
     TeleportToJob(job)
 end
 
--- ============ hop low (1-5 người + scan server sâu + anti chung sever) ============
+-- ============ QUÉT SERVER SIÊU TỐC (150 TRANG SONG SONG TỪ SCRIPT MẪU) ============
 local function FetchFullServers()
-    local rawList = {}
+    local RawServerList = {}
     local browser = RS:FindFirstChild("__ServerBrowser")
 
     if browser then
         local completed = 0
-        local totalPages = 50
+        local totalPages = 150
         local byJob = {}
 
         for page = 1, totalPages do
-            task.delay((page - 1) * 0.02, function()
+            task.spawn(function()
                 for _ = 1, 2 do
                     local ok, res = pcall(function() return browser:InvokeServer(page) end)
                     if ok and type(res) == "table" then
@@ -499,20 +628,20 @@ local function FetchFullServers()
         end
 
         local start = os.clock()
-        repeat task.wait(0.05) until completed >= totalPages or (os.clock() - start) >= 2.5
+        repeat task.wait(0.05) until completed >= totalPages or (os.clock() - start) >= 3.0
 
         for _, item in pairs(byJob) do
-            table.insert(rawList, item)
+            table.insert(RawServerList, item)
         end
     end
 
-    if #rawList == 0 then
+    if #RawServerList == 0 then
         local cursor = ""
         local pageCount = 0
 
-        while cursor and pageCount < 10 do
+        while cursor and pageCount < 20 do
             pageCount = pageCount + 1
-            local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s", 
+            local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
                 game.PlaceId, (cursor ~= "" and ("&cursor=" .. cursor) or ""))
 
             local ok, res = pcall(function() return game:HttpGet(url) end)
@@ -522,10 +651,9 @@ local function FetchFullServers()
             if not okJson or not data or not data.data then break end
 
             for _, s in ipairs(data.data) do
-                local id = tostring(s.id)
-                if id ~= tostring(game.JobId) then
-                    table.insert(rawList, {
-                        id = id,
+                if tostring(s.id) ~= tostring(game.JobId) then
+                    table.insert(RawServerList, {
+                        id = tostring(s.id),
                         playing = tonumber(s.playing) or 0,
                         max = tonumber(s.maxPlayers) or 12,
                         ping = tonumber(s.ping) or 999,
@@ -538,7 +666,8 @@ local function FetchFullServers()
             if not cursor or cursor == "" then break end
         end
     end
-    return rawList
+
+    return RawServerList
 end
 
 local function HopLow(why)
@@ -546,53 +675,59 @@ local function HopLow(why)
     S.Hop = true
     if curTw then pcall(function() curTw:Cancel() end) curTw = nil end
     pcall(Float, false)
-    Say(why or "Hop low...")
+    Say(why or "Đang quét server vắng...")
 
     task.spawn(function()
         local hopStart = os.clock()
         S.vis = S.vis or {}
         S.vis[tostring(game.JobId)] = true
-        MarkServerAnti(game.JobId, 600)
+        MarkServerAnti(game.JobId, 300)
 
         while S.Run and S.Hop do
-            -- Fail-safe 1: Nếu là acc Haki và phát hiện có clone đang có cup chờ mở pad -> Hủy hop low, join ngay!
+            -- Nếu là acc Haki và có clone báo cup -> hủy hop, qua mở pad ngay
             if isHaki then
                 local cupQueues = GetCupQueues()
-                local waitingCup = nil
                 for _, cq in ipairs(cupQueues) do
                     if not cq.ready and cq.job ~= tostring(game.JobId) then
-                        waitingCup = cq
-                        break
+                        S.Hop = false
+                        Say(("Phát hiện cup của %s -> Join ngay!"):format(tostring(cq.name)))
+                        Join(cq.job)
+                        return
                     end
                 end
-                if waitingCup then
-                    S.Hop = false
-                    Say(("Phát hiện cup của %s -> Hủy hop low, Join ngay!"):format(tostring(waitingCup.name)))
-                    Join(waitingCup.job)
-                    return
+            else
+                -- Nếu là Clone không cầm cup và có server đã mở đủ 3 pad -> hủy hop, join ngay
+                if not InBag("God's Chalice") then
+                    for _, cq in ipairs(GetCupQueues()) do
+                        if cq.ready and not cq.summoned and cq.job ~= tostring(game.JobId) then
+                            S.Hop = false
+                            Say(("Server %s đã mở 3 pad -> Join ngay!"):format(tostring(cq.name)))
+                            Join(cq.job)
+                            return
+                        end
+                    end
                 end
             end
 
-            -- Fail-safe 2: Nếu quá 25s chưa hop được -> reset S.Hop để vòng lặp chính chạy lại, không bị kẹt vĩnh viễn
-            if os.clock() - hopStart > 25 then
+            if os.clock() - hopStart > 20 then
                 S.Hop = false
-                Say("Hop low quá 25s -> Reset trạng thái để thử lại")
+                Say("Hop quá 20s -> Reset thử lại")
                 return
             end
 
-            Say("Đang quét server vắng (anti-trùng)...")
+            Say("Đang quét 150 trang server (siêu tốc)...")
             local blocked = GetBlockedJobs()
             local rawList = FetchFullServers()
             local pool = {}
 
-            -- Ưu tiên 1: Lọc server 1 đến 5 người, chưa bị chặn/trùng acc khác
+            -- Ưu tiên 1: Server 1-5 người, vùng Singapore/VN ping thấp trước
             for _, s in ipairs(rawList) do
                 if not blocked[s.id] and s.playing >= 1 and s.playing <= 5 and s.playing < s.max then
                     table.insert(pool, s)
                 end
             end
 
-            -- Ưu tiên 2: Mở rộng lên <= 8 người
+            -- Ưu tiên 2: Server 1-8 người
             if #pool == 0 then
                 for _, s in ipairs(rawList) do
                     if not blocked[s.id] and s.playing >= 1 and s.playing <= 8 and s.playing < s.max then
@@ -601,7 +736,7 @@ local function HopLow(why)
                 end
             end
 
-            -- Ưu tiên 3: Mở rộng lên <= 10 người (cho acc Haki nhường chỗ hoặc né server)
+            -- Ưu tiên 3: Bất kỳ server nào còn trống (< 11 người)
             if #pool == 0 then
                 for _, s in ipairs(rawList) do
                     if not blocked[s.id] and s.playing >= 1 and s.playing <= 10 and s.playing < s.max then
@@ -610,38 +745,25 @@ local function HopLow(why)
                 end
             end
 
-            -- Ưu tiên 4: Bất kỳ server nào còn chỗ (< s.max)
             if #pool == 0 then
-                for _, s in ipairs(rawList) do
-                    if not blocked[s.id] and s.playing < s.max then
-                        table.insert(pool, s)
-                    end
-                end
-            end
-
-            if #pool == 0 then
-                Say("Không tìm thấy server phù hợp, quét lại sau 1s...")
+                Say("Chưa lọc được server, quét lại...")
                 S.vis = { [tostring(game.JobId)] = true }
-                task.wait(1)
+                task.wait(0.5)
             else
-                -- Sắp xếp: Ưu tiên ít player nhất trước (1 -> 5), ping thấp hơn trước
                 table.sort(pool, function(a, b)
-                    if a.playing ~= b.playing then
-                        return a.playing < b.playing
-                    end
+                    if a.playing ~= b.playing then return a.playing < b.playing end
                     return a.ping < b.ping
                 end)
 
                 for i = 1, math.min(#pool, 6) do
                     if not S.Run or not S.Hop then break end
                     local cand = pool[i]
-                    MarkServerAnti(cand.id, 300)
+                    MarkServerAnti(cand.id, 180)
                     S.vis[cand.id] = true
-                    Say(("Hop low -> %s (%d người, ~%dms)"):format(cand.id:sub(1, 8), cand.playing, cand.ping))
+                    Say(("Hop -> %s (%d/%d | %dms)"):format(cand.id:sub(1, 8), cand.playing, cand.max, cand.ping))
                     TeleportToJob(cand.id)
-                    task.wait(4.5)
+                    task.wait(3.5)
                 end
-                task.wait(1)
             end
         end
     end)
@@ -651,10 +773,7 @@ end
 local function HakiStep()
     if not Need(3) then return end
 
-    -- Danh sách server có cup, ưu tiên acc ra cup sớm nhất
     local cupQueues = GetCupQueues()
-
-    -- Kiểm tra xem server hiện tại có phải là server có cup không
     local hereCup = nil
     for _, e in ipairs(cupQueues) do
         if e.job == tostring(game.JobId) then
@@ -664,11 +783,9 @@ local function HakiStep()
     end
 
     if hereCup then
-        -- Đang ở server có cup -> mở pad
         if PadsAll() then
             task.wait(1)
             if PadsAll() then
-                -- Nếu còn server cup khác đang chờ mở pad -> Chuyển thẳng sang server đó luôn
                 local nextCup = nil
                 for _, e in ipairs(cupQueues) do
                     if not e.ready and e.job ~= tostring(game.JobId) then
@@ -677,10 +794,10 @@ local function HakiStep()
                     end
                 end
                 if nextCup then
-                    Say(("Đủ 3 pad -> Chuyển sang server cup tiếp theo (%s)"):format(tostring(nextCup.name)))
+                    Say(("Đủ 3 pad -> Qua mở tiếp cho %s"):format(tostring(nextCup.name)))
                     return Join(nextCup.job)
                 else
-                    return HopLow("Đủ 3 pad -> hop low nhường chỗ")
+                    return HopLow("Đủ 3 pad -> Hop nhường slot cho Clone")
                 end
             end
         end
@@ -691,9 +808,15 @@ local function HakiStep()
                 Eq(p[3])
                 if Go(p[2] + V3(0, 3, 0), nil, "Tới pad " .. p[1]) then
                     local r = Root()
-                    if r then Float(false) r.CFrame = CF(p[2] + V3(0, 3, 0)) end
+                    if r then
+                        Float(false)
+                        r.CFrame = CF(p[2] + V3(0, 3, 0))
+                    end
                     local t = os.clock()
-                    repeat Eq(p[3]) task.wait(0.4) until PadOpen(p) or os.clock() - t > 6 or not S.Run
+                    repeat
+                        Eq(p[3])
+                        task.wait(0.4)
+                    until PadOpen(p) or os.clock() - t > 6 or not S.Run
                 end
                 return
             end
@@ -701,21 +824,14 @@ local function HakiStep()
         return
     end
 
-    -- Không ở server có cup: tìm server có cup chưa mở pad (ưu tiên ra sớm nhất) để join
-    local targetCup = nil
     for _, e in ipairs(cupQueues) do
         if not e.ready and e.job ~= tostring(game.JobId) then
-            targetCup = e
-            break
+            Say(("Join mở pad cho %s (%s)"):format(tostring(e.name), tostring(e.job):sub(1, 8)))
+            return Join(e.job)
         end
     end
 
-    if targetCup then
-        Say(("Ưu tiên cup sớm nhất (%s) -> Join %s"):format(tostring(targetCup.name), tostring(targetCup.job):sub(1, 8)))
-        return Join(targetCup.job)
-    end
-
-    Say("Chờ clone có cup...")
+    Say("Đang chờ Clone nhặt được Cup...")
 end
 
 -- ============ clone & auto chest ============
@@ -727,29 +843,21 @@ local function IsValidChest(obj)
     if ch.seen and ch.seen[obj] then return false end
 
     local name = obj.Name
-    local validName = false
-    if name == "Chest1" or name == "Chest2" or name == "Chest3" then
-        validName = true
-    elseif name:match("^Chest%d?$") or name:match("^Chest_%d+$") then
-        validName = true
-    elseif CS:HasTag(obj, "_ChestTagged") then
-        validName = true
-    end
+    local validName = (name == "Chest1" or name == "Chest2" or name == "Chest3"
+        or name:match("^Chest%d?$") ~= nil or name:match("^Chest_%d+$") ~= nil
+        or CS:HasTag(obj, "_ChestTagged"))
     if not validName then return false end
 
-    -- Tránh các object của người chơi / NPC (ví dụ áo giáp Chestplate)
     local charModel = obj:FindFirstAncestorOfClass("Model")
     if charModel and (Players:GetPlayerFromCharacter(charModel) or charModel:FindFirstChildOfClass("Humanoid")) then
         return false
     end
 
-    -- Tránh rương đã mở / bị tàng hình
     if obj:IsA("BasePart") then
         if obj.Transparency >= 0.8 then return false end
     elseif obj:IsA("Model") then
         local p = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-        if not p or p.Transparency >= 0.8 then return false end
-        if p:GetAttribute("IsDisabled") == true then return false end
+        if not p or p.Transparency >= 0.8 or p:GetAttribute("IsDisabled") == true then return false end
     else
         return false
     end
@@ -760,7 +868,6 @@ end
 local function GetChest()
     local r = Root()
     if not r then return nil end
-
     local best, bd = nil, math.huge
 
     local function Check(obj)
@@ -768,24 +875,14 @@ local function GetChest()
             local ok, cf = pcall(function() return obj:GetPivot() end)
             if ok and cf then
                 local d = (cf.Position - r.Position).Magnitude
-                if d < bd then
-                    best, bd = obj, d
-                end
+                if d < bd then best, bd = obj, d end
             end
         end
     end
 
-    -- 1. Quét rương trong Workspace (Chest1, Chest2, Chest3)
-    for _, c in ipairs(workspace:GetChildren()) do
-        Check(c)
-    end
+    for _, c in ipairs(workspace:GetChildren()) do Check(c) end
+    for _, c in ipairs(CS:GetTagged("_ChestTagged")) do Check(c) end
 
-    -- 2. Quét CollectionService tag _ChestTagged
-    for _, c in ipairs(CS:GetTagged("_ChestTagged")) do
-        Check(c)
-    end
-
-    -- 3. Quét trong Map nếu chưa thấy
     local map = workspace:FindFirstChild("Map")
     if not best and map then
         for _, c in ipairs(map:GetDescendants()) do
@@ -802,33 +899,32 @@ local function Chest()
     if ch.job ~= tostring(game.JobId) then
         ch = { job = tostring(game.JobId), n = 0, t0 = os.clock(), seen = {} }
     end
+
+    -- Anti trùng server khi farm: Chỉ acc vào server SAU mới hop
+    local isLate, olderAcc = CheckLateJoinerConflict()
+    if isLate then
+        return HopLow("Vào sau " .. tostring(olderAcc) .. " -> Nhường server, Hop!")
+    end
+
     if ch.n >= 30 or os.clock() - ch.t0 > 60 then
-        return HopLow(("Chest %d/30 / TTL 60s -> hop low"):format(ch.n))
+        return HopLow(("Chest %d/30 / TTL 60s -> Hop"):format(ch.n))
     end
 
     local r = Root()
     if not r then return end
 
-    -- Né người chơi khác trong bán kính 450 studs
-    for _, pl in ipairs(Players:GetPlayers()) do
-        local pr = pl ~= LP and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
-        if pr and (pr.Position - r.Position).Magnitude < 450 then
-            return HopLow("Có " .. pl.Name .. " gần -> né server")
-        end
-    end
-
     local chest = GetChest()
     if not chest then
-        return HopLow("Hết chest -> hop low")
+        return HopLow("Hết chest -> Hop")
     end
 
     local targetPos = chest:GetPivot().Position
     local dStart = (r.Position - targetPos).Magnitude
-    Say(("Nhặt chest %d/30 (cách %.0fm)"):format(ch.n + 1, dStart))
+    Say(("Nhặt chest %d/30 (%.0fm)"):format(ch.n + 1, dStart))
 
-    -- Bay tới rương, dừng nếu rương biến mất hoặc đã có Cup
     Go(targetPos + V3(0, 1.5, 0), function()
-        return not IsValidChest(chest) or Has("God's Chalice")
+        local lateNow = CheckLateJoinerConflict()
+        return lateNow or not IsValidChest(chest) or InBag("God's Chalice") ~= nil
     end, ("Bay tới chest %d/30"):format(ch.n + 1))
 
     r = Root()
@@ -842,21 +938,12 @@ local function Chest()
                 if firesignal and pcall(function() return touchPart.Touched end) then
                     pcall(firesignal, touchPart.Touched, r)
                 end
-
-                task.wait(0.2)
+                task.wait(0.18)
                 pcall(firetouchinterest, touchPart, r, 0)
                 pcall(firetouchinterest, touchPart, r, 1)
-                if firesignal and pcall(function() return touchPart.Touched end) then
-                    pcall(firesignal, touchPart.Touched, r)
-                end
-
                 pcall(function()
-                    if not chest:GetAttribute("IsDisabled") then
-                        chest:SetAttribute("IsDisabled", true)
-                    end
-                    if touchPart ~= chest and not touchPart:GetAttribute("IsDisabled") then
-                        touchPart:SetAttribute("IsDisabled", true)
-                    end
+                    chest:SetAttribute("IsDisabled", true)
+                    if touchPart ~= chest then touchPart:SetAttribute("IsDisabled", true) end
                 end)
             end
             ch.seen[chest] = true
@@ -871,32 +958,49 @@ end
 
 -- ============ elite (đủ 30 kill cho Yama; elite cũng rơi chalice) ============
 local ELITE = { "diablo", "deandre", "urban" }
-local ELITE_PTS = { V3(-5415, 314, -2800), V3(5350, 1005, 400), V3(-11800, 332, -8800), V3(-13200, 428, -7760), V3(-2200, 38, -10200), V3(-4900, 66, -150) }
+local ELITE_PTS = {
+    V3(-5415, 314, -2800), V3(5350, 1005, 400), V3(-11800, 332, -8800),
+    V3(-13200, 428, -7760), V3(-2200, 38, -10200), V3(-4900, 66, -150)
+}
 local kT, kV, eT, eIdx = 0, nil, 0, 1
+
 local function Kills()
     if os.clock() - kT > 2 then
         kT = os.clock()
         local r = Inv("EliteHunter", "Progress")
-        kV = type(r) == "number" and r or type(r) == "string" and tonumber(r:match("%d+")) or type(r) == "table" and tonumber(r.Kills or r.Progress or r[1]) or kV
+        kV = type(r) == "number" and r
+            or type(r) == "string" and tonumber(r:match("%d+"))
+            or type(r) == "table" and tonumber(r.Kills or r.Progress or r[1])
+            or kV
     end
     return kV
 end
+
 local function NeedElite()
     if Has("Yama") then return false end
     local k = Kills()
     return k ~= nil and k < 30
 end
+
 local function EliteQuest()
     local pg = LP:FindFirstChild("PlayerGui")
     local t = pg and pg:FindFirstChild("TrackedQuestFrame")
     local hd = t and t.Enabled and t:FindFirstChild("Frame") and t.Frame.Visible and t.Frame:FindFirstChild("header")
     local tx = hd and hd:FindFirstChild("textLabel") and hd.textLabel.Text:lower() or ""
-    for _, p in ipairs(ELITE) do if tx:find(p, 1, true) then return true end end
+    for _, p in ipairs(ELITE) do
+        if tx:find(p, 1, true) then return true end
+    end
 end
+
 local function Elite()
+    local isLate, olderAcc = CheckLateJoinerConflict()
+    if isLate then
+        return HopLow("Vào sau " .. tostring(olderAcc) .. " -> Nhường server, Hop!")
+    end
+
     local m, _, _, live, pos = Find(ELITE)
     Say(("Săn Elite (%s/30)"):format(tostring(kV)))
-    if not m then return HopLow("Không có Elite -> hop low") end
+    if not m then return HopLow("Không có Elite -> Hop") end
     if not EliteQuest() and os.clock() - eT > 1.5 then
         eT = os.clock()
         task.spawn(Inv, "EliteHunter")
@@ -904,7 +1008,10 @@ local function Elite()
     if live or (pos and pos.Magnitude > 50) then return Boss(ELITE, pos) end
     local pt = ELITE_PTS[eIdx]
     eIdx = eIdx % #ELITE_PTS + 1
-    Go(pt, function() local em, _, _, lv, p = Find(ELITE) return not em or lv or (p ~= nil and p.Magnitude > 50) end, "Tuần tra tìm Elite")
+    Go(pt, function()
+        local em, _, _, lv, p = Find(ELITE)
+        return not em or lv or (p ~= nil and p.Magnitude > 50)
+    end, "Tuần tra tìm Elite")
 end
 
 local dT, dV = 0, false
@@ -917,66 +1024,82 @@ local function Door()
     return dV
 end
 
-local function WaitAtSpot(isHolder, serverHasCup)
+local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList)
     local needTushita = not Has("Tushita")
     local targetPos = P.Spot
-    local desc = "Chờ tại Sea Castle"
+    local holderStr = (cupHoldersList and #cupHoldersList > 0) and table.concat(cupHoldersList, ",") or "Cup"
+    local desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
 
-    -- Yêu cầu: "khi có cup thì đợi ở sea castle, ko có đợi ở hydra, chỉ khi acc ko cầm cup, sever có cup , thiếu túhsita mới đợi ở hydra"
+    -- Chỉ khi acc KHÔNG cầm cup, server CÓ cup thực sự (qua file) và acc đang thiếu Tushita mới đợi ở Hydra
     if not isHolder and serverHasCup and needTushita then
         targetPos = P.Hydra
-        desc = "Chờ tại Hydra (chuẩn bị Tushita)"
+        desc = "Đợi ở Hydra chờ Tushita (Cup: " .. holderStr .. ")"
     end
 
     local r = Root()
     if r and (r.Position - targetPos).Magnitude > 25 then
-        Go(targetPos, function() return Find(INDRA) end, desc)
+        Go(targetPos, function()
+            local hasCupNow = GetServerCupHolderFromFile()
+            return Find(INDRA) ~= nil or (not isHolder and not hasCupNow)
+        end, desc)
     else
-        Say(desc .. (" (Players: %d/12)"):format(#Players:GetPlayers()))
+        Say(desc .. (" [%d/12]"):format(#Players:GetPlayers()))
     end
 end
 
 local function CloneStep()
     local nh, nt = not Has("Valkyrie Helm"), not Has("Tushita")
-    if not (nh or nt) then Say("HOÀN TẤT") return end
+    if not (nh or nt) then
+        Say("HOÀN TẤT")
+        return
+    end
     if not Need(3) then return end
 
-    if nt and Door() then -- cửa mở: bỏ qua Indra, đi giết Longma
+    -- Nếu đã mở cửa Tushita -> đi đánh Longma
+    if nt and Door() then
         S.weapon = nil
         if not Boss({ "longma" }, P.Longma) then
             local r = Root()
             if r and (r.Position - P.Longma).Magnitude > 60 then
                 Go(P.Longma, function() return Find({ "longma" }) end, "Đang tới hang Longma")
             else
-                HopLow("Không có Longma -> hop low")
+                HopLow("Không có Longma -> Hop")
             end
         end
         return
     end
 
+    -- Nếu Rip Indra đang sống trong server
     if Find(INDRA) then
         if nh then
             Boss(INDRA, P.Castle)
         elseif InBag("Holy Torch") then
             Say("Thắp 5 đuốc Tushita")
-            for i = 1, 5 do Inv("TushitaProgress", "Torch", i) task.wait(0.2) end
+            for i = 1, 5 do
+                Inv("TushitaProgress", "Torch", i)
+                task.wait(0.2)
+            end
         else
             Go(P.Torch, nil, "Đi lấy Holy Torch")
             local r = Root()
-            if r then Float(false) r.CFrame = CF(P.Torch) task.wait(1) end
+            if r then
+                Float(false)
+                r.CFrame = CF(P.Torch)
+                task.wait(1)
+            end
         end
         return
     end
 
-    local myCup = Has("God's Chalice")
-    local summoning = S.sumT and (os.clock() - S.sumT < 40)
+    local myCup = InBag("God's Chalice") ~= nil
+    local summoning = S.sumT and (os.clock() - S.sumT < 35)
 
-    -- 1. NẾU ACC NÀY CẦM CUP HOẶC ĐANG SUMMON
+    -- 1. NẾU ACC NÀY ĐANG CẦM CUP HOẶC VỪA SUMMON
     if myCup or summoning then
         UpdatePresence()
         if summoning then
-            Say("Đợi Rip Indra spawn...")
-            return WaitAtSpot(true) -- Có cup: luôn đợi ở Sea Castle
+            Say("Đợi Rip Indra xuất hiện...")
+            return WaitAtSpot(true, true, { LP.Name })
         end
 
         local zn = false
@@ -984,10 +1107,15 @@ local function CloneStep()
             if pl.Name:lower() == HAKI then zn = true end
         end
 
-        -- Nếu pads đã mở hết, >= 12 người, và acc Haki (znwf) đã rời server
-        if PadsAll() and #Players:GetPlayers() >= 12 and not zn then
+        local padsReady = PadsAll()
+        local isFullServer = (#Players:GetPlayers() >= 12)
+        local allClonesJoined = AllActiveClonesInServer()
+
+        -- Điều kiện spawn Indra:
+        -- Đủ 3 pad Haki + (acc Haki đã rời) + (Full 12 người HOẶC Tất cả các acc Clone chạy Indra online đã vào server)
+        if padsReady and not zn and (isFullServer or allClonesJoined) then
             Equip("God's Chalice")
-            if Go(P.Detect, nil, "Tới summon Indra") then
+            if Go(P.Detect, nil, "Tới bệ Summon Indra") then
                 local r = Root()
                 pcall(function()
                     local d = workspace.Map["Boat Castle"].Summoner.Detection
@@ -999,39 +1127,22 @@ local function CloneStep()
                 UpdatePresence()
             end
         else
-            -- Có cup: luôn đợi ở Sea Castle
-            WaitAtSpot(true)
+            WaitAtSpot(true, true, { LP.Name })
         end
-        return -- TUYỆT ĐỐI KHÔNG JOIN SERVER KHÁC KHI ĐANG CẦM CUP!
+        return
     end
 
-    -- 2. ACC KHÔNG CẦM CUP
-    -- Kiểm tra xem server hiện tại có ai đang cầm cup / summon không
-    local serverHasCup = false
-    for _, e in ipairs(Entries()) do
-        if e.job == tostring(game.JobId) and e.cup then
-            serverHasCup = true
-            break
-        end
-    end
-    if not serverHasCup then
-        for _, pl in ipairs(Players:GetPlayers()) do
-            if HasTool(pl, "God's Chalice") then
-                serverHasCup = true
-                break
-            end
-        end
-    end
+    -- 2. NẾU ACC NÀY KHÔNG CẦM CUP
+    -- Đọc từ file xem server hiện tại có ai cầm cup không
+    local serverHasCup, cupHolders = GetServerCupHolderFromFile()
 
     if serverHasCup then
-        -- Server hiện tại có cup:
-        -- "chỉ khi acc ko cầm cup, sever có cup , thiếu túhsita mới đợi ở hydra, còn lại đợi sea castle"
-        return WaitAtSpot(false, true)
+        -- Server hiện tại thực sự có người cầm cup -> Đợi ở Hydra (nếu thiếu Tushita) hoặc Sea Castle
+        return WaitAtSpot(false, true, cupHolders)
     end
 
-    -- Server hiện tại không có cup:
-    -- Kiểm tra xem có server nào khác có cup đã ready (đã mở 3 pad) không để join vào
-    -- (Yêu cầu: acc cầm cup đã return ở nhánh 1, nên ở đây CHỈ CÓ acc không cầm cup mới join)
+    -- Server hiện tại KHÔNG có cup:
+    -- Kiểm tra xem có server khác đã mở đủ 3 pad (ready) và có người cầm cup không để join vào
     local readyQueues = {}
     for _, e in ipairs(GetCupQueues()) do
         if e.ready and not e.summoned and e.job ~= tostring(game.JobId) then
@@ -1040,37 +1151,51 @@ local function CloneStep()
     end
 
     if #readyQueues > 0 then
-        Say("Join server ready của " .. tostring(readyQueues[1].name))
+        Say("Join server đủ 3 pad của " .. tostring(readyQueues[1].name))
         return Join(readyQueues[1].job)
     end
 
-    -- Không có server ready: farm elite nếu thiếu, hoặc nhặt chest
+    -- Không có cup ở server này và chưa có server nào ready -> Đi săn Elite hoặc nhặt Chest (hết sẽ tự Hop, KHÔNG đứng kẹt ở Hydra)
     if NeedElite() then return Elite() end
     Chest()
 end
--- Loop cập nhật presence định kỳ (heartbeat) cho anti chung sever
-task.spawn(function() while S.Run do pcall(UpdatePresence) task.wait(2.5) end end)
+
+-- Loop cập nhật file mỗi 5 giây (60s không cập nhật = offline)
+task.spawn(function()
+    while S.Run do
+        pcall(UpdatePresence)
+        task.wait(5)
+    end
+end)
 
 -- ============ UI ============
 local gui = Instance.new("ScreenGui")
 gui.Name, gui.ResetOnSpawn = "IndraGui", false
 pcall(function()
-    local par = (typeof(gethui) == "function" and gethui()) or Svc "CoreGui"
-    local old = par:FindFirstChild("IndraGui") if old then old:Destroy() end
+    local par = (typeof(gethui) == "function" and gethui()) or Svc("CoreGui")
+    local old = par:FindFirstChild("IndraGui")
+    if old then old:Destroy() end
     gui.Parent = par
 end)
+
 local f = Instance.new("Frame", gui)
-f.Size, f.Position, f.BackgroundColor3, f.BorderSizePixel, f.Active, f.Draggable = UDim2.new(0, 290, 0, 150), UDim2.new(0, 12, 0.5, -75), Color3.fromRGB(20, 20, 26), 0, true, true
+f.Size, f.Position, f.BackgroundColor3, f.BorderSizePixel, f.Active, f.Draggable =
+    UDim2.new(0, 310, 0, 170), UDim2.new(0, 12, 0.5, -85), Color3.fromRGB(20, 20, 26), 0, true, true
 Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
-local sk = Instance.new("UIStroke", f) sk.Color = Color3.fromRGB(55, 55, 70)
+local sk = Instance.new("UIStroke", f)
+sk.Color = Color3.fromRGB(55, 55, 70)
+
 local function Lbl(parent, sz, pos, txt, size, font)
     local l = Instance.new("TextLabel", parent)
     l.Size, l.Position, l.Text, l.TextSize, l.Font = sz, pos, txt, size, font
-    l.BackgroundTransparency, l.TextColor3, l.TextXAlignment, l.TextYAlignment, l.RichText = 1, Color3.fromRGB(225, 225, 235), Enum.TextXAlignment.Left, Enum.TextYAlignment.Top, true
+    l.BackgroundTransparency, l.TextColor3, l.TextXAlignment, l.TextYAlignment, l.RichText =
+        1, Color3.fromRGB(225, 225, 235), Enum.TextXAlignment.Left, Enum.TextYAlignment.Top, true
     return l
 end
-Lbl(f, UDim2.new(1, -40, 0, 24), UDim2.new(0, 10, 0, 4), "AUTO INDRA  |  " .. (isHaki and "HAKI" or "CLONE"), 13, Enum.Font.GothamBold)
+
+Lbl(f, UDim2.new(1, -40, 0, 24), UDim2.new(0, 10, 0, 4), "AUTO INDRA  |  " .. (isHaki and "HAKI ACC" or "CLONE ACC"), 13, Enum.Font.GothamBold)
 local body = Lbl(f, UDim2.new(1, -20, 1, -34), UDim2.new(0, 10, 0, 30), "", 12, Enum.Font.Gotham)
+
 local x = Instance.new("TextButton", f)
 x.Size, x.Position, x.Text, x.Font, x.TextSize = UDim2.new(0, 24, 0, 24), UDim2.new(1, -30, 0, 4), "X", Enum.Font.GothamBold, 12
 x.BackgroundColor3, x.TextColor3 = Color3.fromRGB(190, 45, 45), Color3.new(1, 1, 1)
@@ -1090,17 +1215,53 @@ x.MouseButton1Click:Connect(Unload)
 
 task.spawn(function()
     while S.Run do
-        local pd, holders, zn = {}, {}, false
+        local pd, zn = {}, false
         for _, p in ipairs(PADS) do
             pd[#pd + 1] = ("<font color='%s'>%s</font>"):format(PadOpen(p) and "#4ade80" or "#f87171", p[1])
         end
         for _, pl in ipairs(Players:GetPlayers()) do
             if pl.Name:lower() == HAKI then zn = true end
-            if HasTool(pl, "God's Chalice") then holders[#holders + 1] = pl.Name end
         end
-        body.Text = ("Pad: %s\nCup: %s\nPlayers: <b>%d/12</b>   znwf: %s\n<font color='#9ca3af'>%s</font>"):format(
-            table.concat(pd, " | "), #holders > 0 and table.concat(holders, ", ") or "-", #Players:GetPlayers(),
-            zn and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>KHÔNG</font>", tostring(S.act))
+
+        local entries = Entries()
+        local onlineCount = #entries
+        local inThisServer = 0
+        local globalCupHolders = {}
+        local serverHasCup, localHolders = GetServerCupHolderFromFile()
+
+        for _, e in ipairs(entries) do
+            if e.job == tostring(game.JobId) then
+                inThisServer = inThisServer + 1
+            end
+            if e.cup then
+                table.insert(globalCupHolders, e.name)
+            end
+        end
+
+        local cupStatusText
+        if serverHasCup then
+            cupStatusText = ("<font color='#4ade80'>CÓ (%s)</font>"):format(table.concat(localHolders, ", "))
+        elseif #globalCupHolders > 0 then
+            cupStatusText = ("<font color='#facc15'>SV Khác (%s)</font>"):format(table.concat(globalCupHolders, ", "))
+        else
+            cupStatusText = "<font color='#f87171'>KHÔNG</font>"
+        end
+
+        body.Text = (
+            "Pad: %s\n" ..
+            "Server Cup (File): %s\n" ..
+            "Online Indra: <font color='#38bdf8'><b>%d acc</b></font> (Tại đây: <b>%d</b>)\n" ..
+            "Players: <b>%d/12</b>   |   znwf: %s\n" ..
+            "<font color='#9ca3af'>%s</font>"
+        ):format(
+            table.concat(pd, " | "),
+            cupStatusText,
+            onlineCount,
+            inThisServer,
+            #Players:GetPlayers(),
+            zn and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>KHÔNG</font>",
+            tostring(S.act)
+        )
         task.wait(0.5)
     end
 end)
@@ -1112,9 +1273,10 @@ task.spawn(function()
         task.wait(0.15)
     end
     while S.Run do
-        if Has("Valkyrie Helm") and Has("Tushita") then
-            S.Done = true Say("HOÀN TẤT")
-            Unload() -- trả quyền điều khiển cho hub
+        if not isHaki and Has("Valkyrie Helm") and Has("Tushita") then
+            S.Done = true
+            Say("HOÀN TẤT")
+            Unload()
             break
         end
         if not S.Hop then

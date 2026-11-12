@@ -714,6 +714,24 @@ local function FetchFullServers()
     return RawServerList
 end
 
+-- ============ kiểm tra cửa Tushita (CommF_:InvokeServer("TushitaProgress").OpenedDoor) ============
+local dT, dV = 0, false
+local function Door(force)
+    if dV then return true end
+    if force or os.clock() - dT > 2 then
+        dT = os.clock()
+        local p = Inv("TushitaProgress")
+        if type(p) == "table" and p.OpenedDoor == true then
+            dV = true
+        end
+    end
+    return dV
+end
+
+local function OnlyNeedLongma()
+    return Has("Valkyrie Helm") and not Has("Tushita") and Door()
+end
+
 local function HopLow(why)
     if S.Hop or not S.Run then return end
     S.Hop = true
@@ -739,7 +757,7 @@ local function HopLow(why)
                         return
                     end
                 end
-            else
+            elseif not OnlyNeedLongma() then
                 if InBag("God's Chalice") then
                     S.Hop = false
                     Say("Đã có God's Chalice -> Hủy Hop!")
@@ -799,7 +817,7 @@ local function HopLow(why)
 
                 for i = 1, math.min(#pool, 6) do
                     if not S.Run or not S.Hop then break end
-                    if not isHaki and InBag("God's Chalice") then
+                    if not isHaki and not OnlyNeedLongma() and InBag("God's Chalice") then
                         S.Hop = false
                         return
                     end
@@ -883,8 +901,6 @@ end
 -- ============ clone & auto chest (CHUẨN CƠ CHẾ NIGHT HUB nighmain.txt) ============
 local ch = { job = "" }
 
--- Hàm GetChest tham khảo trực tiếp từ nighmain.txt (dòng 1043-1059)
--- Lưu ý: Không lọc Transparency >= 0.8 vì hitbox chứa TouchInterest của rương trong Blox Fruits vốn dĩ trong suốt!
 local function GetChest()
     local r = Root()
     if not r then return nil end
@@ -910,7 +926,6 @@ local function GetChest()
         end
     end
 
-    -- Fallback nếu có rương trong tagged chưa có TouchInterest kịp (stream xa)
     if not best then
         for i = 1, #tagged do
             local obj = tagged[i]
@@ -935,7 +950,6 @@ local function Chest()
         ch = { job = tostring(game.JobId), n = 0, t0 = os.clock(), seen = {}, emptyRetries = 0 }
     end
 
-    -- Anti trùng server khi farm: Chỉ acc vào server SAU mới hop
     local isLate, olderAcc = CheckLateJoinerConflict()
     if isLate then
         return HopLow("Trùng SV với " .. tostring(olderAcc))
@@ -964,7 +978,6 @@ local function Chest()
     local dStart = (r.Position - targetPos).Magnitude
     Say(("Nhặt chest %d/30 (%.0fm)"):format(ch.n + 1, dStart))
 
-    -- Bay tới đúng tâm Pivot của rương giống AutoChestTween trong nighmain.txt
     Go(targetPos, function()
         local lateNow = CheckLateJoinerConflict()
         return lateNow
@@ -1039,7 +1052,6 @@ local function CheckQuest(mobName)
     return ok and res or false
 end
 
--- Chỉ chạy khi NeedElite() == true (< 30/30). Nếu server không có Elite thì trả về false để đi nhặt Chest luôn.
 local function TryElite()
     local isLate, olderAcc = CheckLateJoinerConflict()
     if isLate then
@@ -1061,23 +1073,26 @@ local function TryElite()
     return false
 end
 
-local dT, dV = 0, false
-local function Door()
-    if os.clock() - dT > 2 then
-        dT = os.clock()
-        local p = Inv("TushitaProgress")
-        if type(p) == "table" then dV = p.OpenedDoor == true end
+local function HuntLongma()
+    S.weapon = nil
+    if not Boss({ "longma" }, P.Longma) then
+        local r = Root()
+        if r and (r.Position - P.Longma).Magnitude > 60 then
+            Go(P.Longma, function() return Find({ "longma" }) ~= nil end, "Đang tới hang Longma")
+        else
+            return HopLow("Longma chưa spawn")
+        end
     end
-    return dV
 end
 
 local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList)
-    local needTushita = not Has("Tushita")
+    -- Chỉ đứng đợi ở Hydra nếu chưa có Tushita VÀ chưa mở cửa Tushita
+    local needTushitaTorch = not Has("Tushita") and not Door()
     local targetPos = P.Spot
     local holderStr = (cupHoldersList and #cupHoldersList > 0) and table.concat(cupHoldersList, ",") or "Cup"
     local desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
 
-    if not isHolder and serverHasCup and needTushita then
+    if not isHolder and serverHasCup and needTushitaTorch then
         targetPos = P.Hydra
         desc = "Đợi ở Hydra chờ Tushita (Cup: " .. holderStr .. ")"
     end
@@ -1106,32 +1121,49 @@ local function CloneStep()
     end
     if not Need(3) then return end
 
-    -- 1. Nếu Rip Indra đang xuất hiện trong server -> ưu tiên xử lý ngay
+    local doorOpened = Door()
+
+    -- 1. NẾU ĐÃ CÓ VALKYRIE HELM, CHƯA CÓ TUSHITA VÀ CỬA TUSHITA ĐÃ MỞ (OpenedDoor == true)
+    -- -> Không cần Indra, không lấy đuốc ở thác nữa, đi thẳng đánh Longma (trừ khi chính acc này đang cầm Cup hỗ trợ)
+    local myCup = InBag("God's Chalice") ~= nil
+    local summoning = S.sumT and (os.clock() - S.sumT < 35)
+    if not nh and nt and doorOpened and not myCup and not summoning then
+        return HuntLongma()
+    end
+
+    -- 2. Nếu Rip Indra đang xuất hiện trong server
     if Find(INDRA) then
         if nh then
+            -- Chưa có Valkyrie Helm -> đánh Rip Indra
             Boss(INDRA, P.Castle)
-        elseif InBag("Holy Torch") then
-            Say("Thắp 5 đuốc Tushita")
-            for i = 1, 5 do
-                Inv("TushitaProgress", "Torch", i)
-                task.wait(0.2)
+        elseif nt and not doorOpened then
+            -- Đã có Valkyrie Helm, thiếu Tushita và cửa Tushita CHƯA mở -> Đi lấy đuốc & thắp 5 đuốc
+            if InBag("Holy Torch") then
+                Say("Thắp 5 đuốc Tushita")
+                for i = 1, 5 do
+                    Inv("TushitaProgress", "Torch", i)
+                    task.wait(0.2)
+                end
+                Door(true)
+            else
+                Go(P.Torch, function() return Door(true) or InBag("Holy Torch") ~= nil end, "Đi lấy Holy Torch")
+                local r = Root()
+                if r and not Door() then
+                    Float(false)
+                    r.CFrame = CF(P.Torch)
+                    task.wait(1)
+                end
             end
+        elseif nt and doorOpened then
+            -- Cửa đã mở sẵn -> đi đánh Longma luôn, không bay ra thác nữa
+            return HuntLongma()
         else
-            Go(P.Torch, nil, "Đi lấy Holy Torch")
-            local r = Root()
-            if r then
-                Float(false)
-                r.CFrame = CF(P.Torch)
-                task.wait(1)
-            end
+            Boss(INDRA, P.Castle)
         end
         return
     end
 
-    local myCup = InBag("God's Chalice") ~= nil
-    local summoning = S.sumT and (os.clock() - S.sumT < 35)
-
-    -- 2. NẾU ACC NÀY ĐANG CẦM CUP HOẶC VỪA SUMMON
+    -- 3. NẾU ACC NÀY ĐANG CẦM CUP HOẶC VỪA SUMMON
     if myCup or summoning then
         UpdatePresence()
         if summoning then
@@ -1167,7 +1199,7 @@ local function CloneStep()
         return
     end
 
-    -- 3. NẾU ACC NÀY KHÔNG CẦM CUP -> KIỂM TRA SERVER HIỆN TẠI HOẶC SERVER KHÁC CÓ CUP KHÔNG
+    -- 4. NẾU ACC NÀY KHÔNG CẦM CUP (và vẫn cần Indra cho Valkyrie hoặc mở cửa Tushita)
     local serverHasCup, cupHolders = GetServerCupHolderFromFile()
     if serverHasCup then
         return WaitAtSpot(false, true, cupHolders)
@@ -1183,20 +1215,6 @@ local function CloneStep()
     if #readyQueues > 0 then
         Say("Join server đủ 3 pad của " .. tostring(readyQueues[1].name))
         return Join(readyQueues[1].job)
-    end
-
-    -- 4. Nếu chỉ còn thiếu Tushita (đã có Valkyrie Helm) và đã mở cửa Tushita -> đi săn Longma
-    if not nh and nt and Door() then
-        S.weapon = nil
-        if not Boss({ "longma" }, P.Longma) then
-            local r = Root()
-            if r and (r.Position - P.Longma).Magnitude > 60 then
-                Go(P.Longma, function() return Find({ "longma" }) end, "Đang tới hang Longma")
-            else
-                return HopLow("Longma chưa spawn")
-            end
-        end
-        return
     end
 
     -- 5. NẾU CHƯA ĐỦ 30 ELITE -> SĂN ELITE, NẾU ĐỦ 30/30 RỒI THÌ BỎ QUA ELITE VÀ TẬP TRUNG 100% CHEST
@@ -1227,7 +1245,7 @@ end)
 
 local f = Instance.new("Frame", gui)
 f.Size, f.Position, f.BackgroundColor3, f.BorderSizePixel, f.Active, f.Draggable =
-    UDim2.new(0, 320, 0, 185), UDim2.new(0, 12, 0.5, -92), Color3.fromRGB(20, 20, 26), 0, true, true
+    UDim2.new(0, 330, 0, 205), UDim2.new(0, 12, 0.5, -102), Color3.fromRGB(20, 20, 26), 0, true, true
 Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
 local sk = Instance.new("UIStroke", f)
 sk.Color = Color3.fromRGB(55, 55, 70)
@@ -1302,8 +1320,17 @@ task.spawn(function()
             Has("Yama") and " (Có Yama)" or ""
         )
 
+        local hasValk = Has("Valkyrie Helm")
+        local hasTush = Has("Tushita")
+        local isDoorOpen = Door()
+
+        local valkText = hasValk and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>CHƯA</font>"
+        local tushText = hasTush and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>CHƯA</font>"
+        local doorText = isDoorOpen and "<font color='#4ade80'>ĐÃ MỞ</font>" or "<font color='#f87171'>ĐÓNG</font>"
+
         body.Text = (
             "Pad: %s\n" ..
+            "Valkyrie: %s | Tushita: %s | Cửa: %s\n" ..
             "Server Cup (File): %s\n" ..
             "Elite: %s   |   Chest SV: <b>%d/30</b>\n" ..
             "Online Indra: <font color='#38bdf8'><b>%d acc</b></font> (Tại đây: <b>%d</b>)\n" ..
@@ -1311,6 +1338,9 @@ task.spawn(function()
             "<font color='#9ca3af'>%s</font>"
         ):format(
             table.concat(pd, " | "),
+            valkText,
+            tushText,
+            doorText,
             cupStatusText,
             eliteText,
             ch.n or 0,
@@ -1331,6 +1361,7 @@ task.spawn(function()
         task.wait(0.15)
     end
     S.spawnClock = os.clock()
+    Door(true)
     while S.Run do
         if not isHaki and Has("Valkyrie Helm") and Has("Tushita") then
             S.Done = true

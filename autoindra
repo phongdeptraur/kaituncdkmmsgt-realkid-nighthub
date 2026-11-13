@@ -282,9 +282,16 @@ local function Equip(name)
         end
         if b then h:EquipTool(b) return b end
     else
-        if t and (t.ToolTip == "Melee" or t.ToolTip == "Sword") then return t end
+        if t and t.ToolTip == "Melee" then return t end
         for _, i in ipairs(LP.Backpack:GetChildren()) do
-            if i:IsA("Tool") and (i.ToolTip == "Melee" or i.ToolTip == "Sword") then
+            if i:IsA("Tool") and i.ToolTip == "Melee" then
+                h:EquipTool(i)
+                return i
+            end
+        end
+        if t and t.ToolTip == "Sword" then return t end
+        for _, i in ipairs(LP.Backpack:GetChildren()) do
+            if i:IsA("Tool") and i.ToolTip == "Sword" then
                 h:EquipTool(i)
                 return i
             end

@@ -1,4 +1,4 @@
--- AUTO INDRA (Haki acc + Clone accs) | tween speed 190 | smart portal | sync qua file IndraSync/
+-- AUTO INDRA (Haki acc + Clone accs) | tween speed 190 | smart portal | escape Cursed Ship & Submerged Island | sync qua file IndraSync/
 repeat task.wait() until game:IsLoaded()
 local G = getgenv()
 if G._Indra and G._Indra.Run then pcall(G._Indra.Stop) task.wait(0.3) end
@@ -22,12 +22,16 @@ local isHaki = LP.Name:lower() == HAKI
 pcall(makefolder, DIR)
 
 local P = {
-    Castle = V3(-5085.24, 314.52, -3156.28),
-    Spot   = V3(-4995.32, 314.55, -3008.93),
-    Detect = V3(-5563.5, 312.4, -2662.6),
-    Hydra  = V3(5404.4, 1006.8, 506.2),
-    Torch  = V3(5713.2, 41.9, 255.3),
-    Longma = V3(-10238.88, 389.79, -9549.79),
+    Castle  = V3(-5085.24, 314.52, -3156.28),
+    Spot    = V3(-4995.32, 314.55, -3008.93),
+    Detect  = V3(-5563.5, 312.4, -2662.6),
+    Hydra   = V3(5404.4, 1006.8, 506.2),
+    Torch   = V3(5713.2, 41.9, 255.3),
+    Longma  = V3(-10238.88, 389.79, -9549.79),
+    Ship    = V3(909.51, 125.37, 32864.02),
+    ShipOut = V3(-6508.55810546875, 89.03500366210938, -132.83999633789062),
+    Sub     = V3(11279.25, -2138.93, 9873.44),
+    SubTp   = V3(11425.38, -2154.73, 9729.36),
 }
 local PADS = {
     { "Red",    V3(-5414.4, 309.8, -2212.5), 287 },
@@ -64,14 +68,24 @@ local function Say(a)
     if a then S.act = a end
 end
 
+local SEA = {
+    [2753915549] = 1,
+    [4442272183] = 2,
+    [79091703265657] = 2,
+    [7449423635] = 3,
+    [100117331123089] = 3
+}
 local function Sea()
-    return ({ [7449423635] = 3, [100117331123089] = 3 })[game.PlaceId] or 0
+    return SEA[game.PlaceId] or 0
 end
+
+local EscapeZones
 
 local function Need(n)
     if Sea() == n then return true end
-    Say("Đang chuyển Sea 3...")
-    Inv("TravelZou")
+    if EscapeZones and not EscapeZones() then return false end
+    Say("Đang chuyển Sea " .. n .. "...")
+    Inv(n == 3 and "TravelZou" or n == 2 and "TravelDressrosa" or "TravelMain")
     task.wait(5)
 end
 
@@ -194,7 +208,6 @@ local function Fly(pos, abort, desc)
             -- Kiểm tra mỗi 0.22s xem nhân vật có bị giật ngược về vị trí verified spot không
             if os.clock() - checkT >= 0.22 then
                 checkT = os.clock()
-                -- Nếu khoảng cách tới đích không giảm được (hoặc bị kéo lùi lại)
                 if curDist >= lastDist - 8 then
                     if snapPos and (r.Position - snapPos).Magnitude < 45 then
                         snapCount = snapCount + 1
@@ -215,7 +228,6 @@ local function Fly(pos, abort, desc)
                         break
                     end
                 elseif curDist < lastDist - 25 then
-                    -- Đang bay tiến triển bình thường
                     snapCount = 0
                 end
                 lastDist = curDist
@@ -233,11 +245,52 @@ local function Fly(pos, abort, desc)
     return S.Run
 end
 
+-- Thoát khỏi Cursed Ship (Sea 2) và Submerged Island (Sea 3) trước khi Tween hoặc chuyển Sea
+EscapeZones = function(targetPos, abort)
+    local r = Root()
+    if not r or not S.Run or S.Hop then return false end
+
+    -- Sea 2: Đang ở trong Cursed Ship (bán kính 4000 stud quanh 909.51, 125.37, 32864.02)
+    if Sea() == 2 and (r.Position - P.Ship).Magnitude <= 4000 then
+        if not targetPos or (targetPos - P.Ship).Magnitude > 4000 then
+            if Fly(P.Ship, abort, "Đang tới cửa rời Cursed Ship") then
+                pcall(function()
+                    local v = (type(vector) == "table" and type(vector.create) == "function")
+                        and vector.create(-6508.55810546875, 89.03500366210938, -132.83999633789062)
+                        or P.ShipOut
+                    RS:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("requestEntrance", v)
+                end)
+                task.wait(1.2)
+            else
+                return false
+            end
+        end
+    end
+
+    -- Sea 3: Đang ở dưới Submerged Island (bán kính 3000 stud quanh 11279.25, -2138.93, 9873.44)
+    r = Root()
+    if r and Sea() == 3 and (r.Position - P.Sub).Magnitude <= 3000 then
+        if not targetPos or (targetPos - P.Sub).Magnitude > 3000 then
+            if Fly(P.SubTp, abort, "Đang ra tàu ngầm rời Submerged Island") then
+                pcall(function()
+                    RS:WaitForChild("Modules"):WaitForChild("Net"):WaitForChild("RF/SubmarineTransportation"):InvokeServer("InitiateTeleport", "Tiki Outpost")
+                end)
+                task.wait(1.5)
+            else
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
 local function Go(pos, abort, desc)
     if not S.Run or S.Hop then return false end
+    if not EscapeZones(pos, abort) then return false end
     for _ = 1, 2 do
         local r = Root()
-        if not r or (abort and abort()) then return false end
+        if not r or not S.Run or (abort and abort()) then return false end
         local direct = (r.Position - pos).Magnitude
         if direct < 1200 or Sea() ~= 3 or not Has("Valkyrie Helm") then break end
         local best, bt = nil, direct - 600
@@ -260,6 +313,7 @@ local function Go(pos, abort, desc)
             Inv("requestEntrance", best.e)
             task.wait(0.25)
         end
+        if S.Run then Float(true) end
     end
     return Fly(pos, abort, desc or "Đang di chuyển")
 end
@@ -905,7 +959,7 @@ local function HakiStep()
     Say("Đang chờ Clone nhặt được Cup...")
 end
 
--- ============ clone & auto chest (CHUẨN CƠ CHẾ NIGHT HUB nighmain.txt) ============
+-- ============ clone & auto chest ============
 local ch = { job = "" }
 
 local function GetChest()
@@ -915,6 +969,7 @@ local function GetChest()
     local tagged = CS:GetTagged("_ChestTagged")
     local huge = math.huge
     local best = nil
+    local inSub = (r.Position - P.Sub).Magnitude <= 3000
 
     for i = 1, #tagged do
         local obj = tagged[i]
@@ -923,10 +978,13 @@ local function GetChest()
             if hasTouch then
                 local ok, cf = pcall(function() return obj:GetPivot() end)
                 if ok and cf then
-                    local magnitude = (cf.Position - r.Position).Magnitude
-                    if magnitude <= huge then
-                        best = obj
-                        huge = magnitude
+                    -- Bỏ qua rương dưới Submerged Island nếu nhân vật đang ở trên mặt đất
+                    if inSub or (cf.Position - P.Sub).Magnitude > 3000 then
+                        local magnitude = (cf.Position - r.Position).Magnitude
+                        if magnitude <= huge then
+                            best = obj
+                            huge = magnitude
+                        end
                     end
                 end
             end
@@ -939,10 +997,12 @@ local function GetChest()
             if obj and obj.Parent and not obj:GetAttribute("IsDisabled") and not (ch.seen and ch.seen[obj]) then
                 local ok, cf = pcall(function() return obj:GetPivot() end)
                 if ok and cf then
-                    local magnitude = (cf.Position - r.Position).Magnitude
-                    if magnitude <= huge then
-                        best = obj
-                        huge = magnitude
+                    if inSub or (cf.Position - P.Sub).Magnitude > 3000 then
+                        local magnitude = (cf.Position - r.Position).Magnitude
+                        if magnitude <= huge then
+                            best = obj
+                            huge = magnitude
+                        end
                     end
                 end
             end
@@ -1028,7 +1088,7 @@ local function Chest()
     end
 end
 
--- ============ elite (ĐỦ 30/30 HOẶC CÓ YAMA THÌ BỎ QUA HOÀN TOÀN, TẬP TRUNG CHEST) ============
+-- ============ elite ============
 local ELITE = { "diablo", "deandre", "urban" }
 local kT, kV, eT = 0, 0, 0
 
@@ -1093,7 +1153,6 @@ local function HuntLongma()
 end
 
 local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList)
-    -- Chỉ đứng đợi ở Hydra nếu chưa có Tushita VÀ chưa mở cửa Tushita
     local needTushitaTorch = not Has("Tushita") and not Door()
     local targetPos = P.Spot
     local holderStr = (cupHoldersList and #cupHoldersList > 0) and table.concat(cupHoldersList, ",") or "Cup"
@@ -1130,8 +1189,7 @@ local function CloneStep()
 
     local doorOpened = Door()
 
-    -- 1. NẾU ĐÃ CÓ VALKYRIE HELM, CHƯA CÓ TUSHITA VÀ CỬA TUSHITA ĐÃ MỞ (OpenedDoor == true)
-    -- -> Không cần Indra, không lấy đuốc ở thác nữa, đi thẳng đánh Longma (trừ khi chính acc này đang cầm Cup hỗ trợ)
+    -- 1. Đã có Valkyrie Helm, thiếu Tushita và cửa Tushita đã mở -> đi thẳng đánh Longma
     local myCup = InBag("God's Chalice") ~= nil
     local summoning = S.sumT and (os.clock() - S.sumT < 35)
     if not nh and nt and doorOpened and not myCup and not summoning then
@@ -1141,10 +1199,8 @@ local function CloneStep()
     -- 2. Nếu Rip Indra đang xuất hiện trong server
     if Find(INDRA) then
         if nh then
-            -- Chưa có Valkyrie Helm -> đánh Rip Indra
             Boss(INDRA, P.Castle)
         elseif nt and not doorOpened then
-            -- Đã có Valkyrie Helm, thiếu Tushita và cửa Tushita CHƯA mở -> Đi lấy đuốc & thắp 5 đuốc
             if InBag("Holy Torch") then
                 Say("Thắp 5 đuốc Tushita")
                 for i = 1, 5 do
@@ -1162,7 +1218,6 @@ local function CloneStep()
                 end
             end
         elseif nt and doorOpened then
-            -- Cửa đã mở sẵn -> đi đánh Longma luôn, không bay ra thác nữa
             return HuntLongma()
         else
             Boss(INDRA, P.Castle)
@@ -1170,7 +1225,7 @@ local function CloneStep()
         return
     end
 
-    -- 3. NẾU ACC NÀY ĐANG CẦM CUP HOẶC VỪA SUMMON
+    -- 3. Nếu acc này đang cầm Cup hoặc vừa summon
     if myCup or summoning then
         UpdatePresence()
         if summoning then
@@ -1206,7 +1261,7 @@ local function CloneStep()
         return
     end
 
-    -- 4. NẾU ACC NÀY KHÔNG CẦM CUP (và vẫn cần Indra cho Valkyrie hoặc mở cửa Tushita)
+    -- 4. Nếu acc này không cầm Cup
     local serverHasCup, cupHolders = GetServerCupHolderFromFile()
     if serverHasCup then
         return WaitAtSpot(false, true, cupHolders)
@@ -1224,7 +1279,7 @@ local function CloneStep()
         return Join(readyQueues[1].job)
     end
 
-    -- 5. NẾU CHƯA ĐỦ 30 ELITE -> SĂN ELITE, NẾU ĐỦ 30/30 RỒI THÌ BỎ QUA ELITE VÀ TẬP TRUNG 100% CHEST
+    -- 5. Săn Elite nếu chưa đủ 30/30, ngược lại tập trung nhặt Chest
     if NeedElite() then
         if TryElite() then return end
     end

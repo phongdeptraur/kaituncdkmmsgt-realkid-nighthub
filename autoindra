@@ -546,6 +546,44 @@ local function Eq(id)
     end)
 end
 
+local dT, dV = 0, false
+local function Door(force)
+    if dV then return true end
+    if force or os.clock() - dT > 2 then
+        dT = os.clock()
+        local p = Inv("TushitaProgress")
+        if type(p) == "table" and p.OpenedDoor == true then
+            dV = true
+        end
+    end
+    return dV
+end
+
+local function GetRequiredSpot(isHolder)
+    -- Acc cầm Cup luôn pre-tween về Sea Castle bất kể ưu tiên item nào
+    if isHolder then
+        return P.Spot, "Sea Castle"
+    end
+    if not Has("Tushita") and not Door() then
+        return P.Hydra, "Hydra"
+    end
+    return P.Spot, "Sea Castle"
+end
+
+local function IsAtRequiredSpot(isHolder)
+    if Sea() ~= 3 then return false end
+    local r = Root()
+    if not r then return false end
+    local targetPos = GetRequiredSpot(isHolder)
+    if (r.Position - targetPos).Magnitude <= 35 then
+        return true
+    end
+    if isHolder and (r.Position - P.Detect).Magnitude <= 35 then
+        return true
+    end
+    return false
+end
+
 local function UpdatePresence()
     local curJob = tostring(game.JobId)
     if S.lastJob ~= curJob then
@@ -561,6 +599,10 @@ local function UpdatePresence()
         S.cupTime = nil
     end
 
+    local summoning = (S.sumT and (os.clock() - S.sumT < 12)) and true or false
+    local atSpot = (not isHaki) and IsAtRequiredSpot(cup or summoning) or false
+    S.atSpot = atSpot
+
     local data = {
         name = LP.Name,
         job = curJob,
@@ -569,8 +611,9 @@ local function UpdatePresence()
         cupTime = S.cupTime or os.time(),
         isHaki = isHaki,
         cup = cup,
+        atSpot = atSpot,
         ready = PadsAll(),
-        summoned = (S.sumT and (os.clock() - S.sumT < 35)) and true or false
+        summoned = summoning
     }
     pcall(writefile, myFile, HS:JSONEncode(data))
 end
@@ -598,7 +641,7 @@ local function GetServerCupHolderFromFile()
     local myJob = tostring(game.JobId)
     local holders = {}
 
-    if InBag("God's Chalice") or (S.sumT and (os.clock() - S.sumT < 35)) then
+    if InBag("God's Chalice") or (S.sumT and (os.clock() - S.sumT < 12)) then
         table.insert(holders, LP.Name)
     end
 
@@ -613,13 +656,13 @@ local function GetServerCupHolderFromFile()
     return #holders > 0, holders
 end
 
--- Thống kê acc online nội bộ và số acc Clone chưa nằm trong bất kỳ server Cup nào
+-- Thống kê acc online nội bộ: số acc Clone chưa vào SV Cup & số acc trong SV Cup chưa tới điểm pre-tween
 local function GetCupServerStats(entriesList)
     local entries = entriesList or Entries()
     local myJob = tostring(game.JobId)
     local cupJobs = {}
 
-    if InBag("God's Chalice") or (S.sumT and (os.clock() - S.sumT < 35)) then
+    if InBag("God's Chalice") or (S.sumT and (os.clock() - S.sumT < 12)) then
         cupJobs[myJob] = true
     end
 
@@ -631,19 +674,31 @@ local function GetCupServerStats(entriesList)
 
     local unjoinedCount = 0
     local unjoinedNames = {}
+    local notAtSpotCount = 0
+    local notAtSpotNames = {}
+
     for _, e in ipairs(entries) do
         if not e.isHaki and not IsHakiName(e.name) then
             local eJob = tostring(e.job or "")
+            local inPlayersHere = (Players:FindFirstChild(e.name) ~= nil)
             local inAnyCupServer = (eJob ~= "" and cupJobs[eJob] == true)
-                or (cupJobs[myJob] == true and Players:FindFirstChild(e.name) ~= nil)
+                or (cupJobs[myJob] == true and inPlayersHere)
             if not inAnyCupServer then
                 unjoinedCount = unjoinedCount + 1
                 table.insert(unjoinedNames, e.name)
+            elseif cupJobs[myJob] == true and (eJob == myJob or inPlayersHere) then
+                local readySpot = (e.name == LP.Name)
+                    and IsAtRequiredSpot(InBag("God's Chalice") ~= nil or (S.sumT and (os.clock() - S.sumT < 12)))
+                    or (eJob == myJob and e.atSpot == true)
+                if not readySpot then
+                    notAtSpotCount = notAtSpotCount + 1
+                    table.insert(notAtSpotNames, e.name)
+                end
             end
         end
     end
 
-    return unjoinedCount, unjoinedNames
+    return unjoinedCount, unjoinedNames, notAtSpotCount, notAtSpotNames
 end
 
 local function CheckLateJoinerConflict()
@@ -801,20 +856,6 @@ local function FetchFullServers()
     return RawServerList
 end
 
--- ============ kiểm tra cửa Tushita (CommF_:InvokeServer("TushitaProgress").OpenedDoor) ============
-local dT, dV = 0, false
-local function Door(force)
-    if dV then return true end
-    if force or os.clock() - dT > 2 then
-        dT = os.clock()
-        local p = Inv("TushitaProgress")
-        if type(p) == "table" and p.OpenedDoor == true then
-            dV = true
-        end
-    end
-    return dV
-end
-
 local function OnlyNeedLongma()
     return Has("Valkyrie Helm") and not Has("Tushita") and Door()
 end
@@ -844,12 +885,11 @@ local function HopLow(why)
                         return
                     end
                 end
+            elseif InBag("God's Chalice") then
+                S.Hop = false
+                Say("Đã có God's Chalice -> Hủy Hop, về Sea Castle!")
+                return
             elseif not OnlyNeedLongma() then
-                if InBag("God's Chalice") then
-                    S.Hop = false
-                    Say("Đã có God's Chalice -> Hủy Hop!")
-                    return
-                end
                 for _, cq in ipairs(GetCupQueues()) do
                     if cq.ready and not cq.summoned and cq.job ~= tostring(game.JobId) then
                         S.Hop = false
@@ -1178,20 +1218,25 @@ local function HuntLongma()
     end
 end
 
-local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList, unjoinedCount)
-    local needTushitaTorch = not Has("Tushita") and not Door()
-    local targetPos = P.Spot
+local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList, unjoinedCount, notAtSpotCount, notAtSpotNames)
+    local targetPos, spotName = GetRequiredSpot(isHolder)
     local holderStr = (cupHoldersList and #cupHoldersList > 0) and table.concat(cupHoldersList, ",") or "Cup"
     local desc
     if isHolder then
-        desc = ("Đợi ở Sea Castle (Chưa vào SV Cup: %d acc)"):format(unjoinedCount or 0)
+        if (unjoinedCount or 0) > 0 then
+            desc = ("Đợi ở %s (Chưa vào SV: %d acc)"):format(spotName, unjoinedCount)
+        elseif (notAtSpotCount or 0) > 0 then
+            local waitList = (notAtSpotNames and #notAtSpotNames > 0) and table.concat(notAtSpotNames, ",") or (notAtSpotCount .. " acc")
+            desc = ("Đợi acc tới điểm (%s)"):format(waitList)
+        else
+            desc = ("Đợi điều kiện spawn ở %s"):format(spotName)
+        end
     else
-        desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
-    end
-
-    if not isHolder and serverHasCup and needTushitaTorch then
-        targetPos = P.Hydra
-        desc = "Đợi ở Hydra chờ Tushita (Cup: " .. holderStr .. ")"
+        if spotName == "Hydra" then
+            desc = "Pre-tween Hydra lấy Holy Torch (Cup: " .. holderStr .. ")"
+        else
+            desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
+        end
     end
 
     local r = Root()
@@ -1200,7 +1245,13 @@ local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList, unjoinedCount)
             local hasCupNow = GetServerCupHolderFromFile()
             return Find(INDRA) ~= nil or (not isHolder and not hasCupNow)
         end, desc)
+        if IsAtRequiredSpot(isHolder) ~= S.atSpot then
+            UpdatePresence()
+        end
     else
+        if not S.atSpot then
+            UpdatePresence()
+        end
         Say(desc .. (" [%d/12]"):format(#Players:GetPlayers()))
     end
 end
@@ -1219,19 +1270,21 @@ local function CloneStep()
     if not Need(3) then return end
 
     local doorOpened = Door()
-
-    -- 1. Đã có Valkyrie Helm, thiếu Tushita và cửa Tushita đã mở -> đi thẳng đánh Longma
     local myCup = InBag("God's Chalice") ~= nil
-    local summoning = S.sumT and (os.clock() - S.sumT < 35)
-    if not nh and nt and doorOpened and not myCup and not summoning then
-        return HuntLongma()
+    local indraObj = Find(INDRA)
+    if indraObj then
+        S.sumT = nil
+    end
+    local summoning = (not indraObj) and S.sumT and (os.clock() - S.sumT < 12)
+
+    if IsAtRequiredSpot(myCup or summoning) ~= S.atSpot then
+        UpdatePresence()
     end
 
-    -- 2. Nếu Rip Indra đang xuất hiện trong server
-    if Find(INDRA) then
-        if nh then
-            Boss(INDRA, P.Castle)
-        elseif nt and not doorOpened then
+    -- 1. Thứ tự ưu tiên khi Rip Indra đang xuất hiện:
+    --    Mở cửa Tushita (lấy Holy Torch) -> Ngay khi mở cửa xong thì tween đi kill Indra
+    if indraObj then
+        if nt and not doorOpened then
             if InBag("Holy Torch") then
                 Say("Thắp 5 đuốc Tushita")
                 for i = 1, 5 do
@@ -1248,20 +1301,18 @@ local function CloneStep()
                     task.wait(1)
                 end
             end
-        elseif nt and doorOpened then
-            return HuntLongma()
         else
             Boss(INDRA, P.Castle)
         end
         return
     end
 
-    -- 3. Nếu acc này đang cầm Cup hoặc vừa summon
+    -- 2. Nếu acc này đang cầm Cup hoặc vừa summon
     if myCup or summoning then
         UpdatePresence()
         if summoning then
             Say("Đợi Rip Indra xuất hiện...")
-            return WaitAtSpot(true, true, { LP.Name }, 0)
+            return WaitAtSpot(true, true, { LP.Name }, 0, 0)
         end
 
         local hakiInServer = false
@@ -1274,10 +1325,10 @@ local function CloneStep()
 
         local padsReady = PadsAll()
         local isFullServer = (#Players:GetPlayers() >= 12)
-        local unjoinedCount = GetCupServerStats()
+        local unjoinedCount, _, notAtSpotCount, notAtSpotNames = GetCupServerStats()
 
-        -- Nếu số acc online nội bộ chưa vào server Cup xuống 0 -> spawn luôn không cần đợi full 12/12
-        if padsReady and not hakiInServer and (isFullServer or unjoinedCount == 0) then
+        -- Đủ 3 pad + Haki đã rời + đủ acc vào SV Cup + tất cả acc đã pre-tween tới điểm cần đến -> Spawn Indra
+        if padsReady and not hakiInServer and (isFullServer or unjoinedCount == 0) and notAtSpotCount == 0 then
             Equip("God's Chalice")
             if Go(P.Detect, nil, "Tới bệ Summon Indra") then
                 local r = Root()
@@ -1291,17 +1342,23 @@ local function CloneStep()
                 UpdatePresence()
             end
         else
-            WaitAtSpot(true, true, { LP.Name }, unjoinedCount)
+            WaitAtSpot(true, true, { LP.Name }, unjoinedCount, notAtSpotCount, notAtSpotNames)
         end
         return
     end
 
-    -- 4. Nếu acc này không cầm Cup
+    -- 3. Nếu server hiện tại đang có Cup chờ spawn -> pre-tween tới Hydra (nếu cần mở cửa) hoặc Sea Castle
     local serverHasCup, cupHolders = GetServerCupHolderFromFile()
     if serverHasCup then
         return WaitAtSpot(false, true, cupHolders)
     end
 
+    -- 4. Kill Longma sau cùng (khi Indra không còn trong server, không có Cup chờ spawn, và cửa đã mở)
+    if nt and doorOpened then
+        return HuntLongma()
+    end
+
+    -- 5. Tìm server Cup đã mở đủ 3 pad để join
     local readyQueues = {}
     for _, e in ipairs(GetCupQueues()) do
         if e.ready and not e.summoned and e.job ~= tostring(game.JobId) then
@@ -1314,7 +1371,7 @@ local function CloneStep()
         return Join(readyQueues[1].job)
     end
 
-    -- 5. Săn Elite nếu chưa đủ 30/30, ngược lại tập trung nhặt Chest
+    -- 6. Săn Elite nếu chưa đủ 30/30, ngược lại tập trung nhặt Chest
     if NeedElite() then
         if TryElite() then return end
     end
@@ -1394,7 +1451,7 @@ task.spawn(function()
         local inThisServer = 0
         local globalCupHolders = {}
         local serverHasCup, localHolders = GetServerCupHolderFromFile()
-        local unjoinedCount = GetCupServerStats(entries)
+        local unjoinedCount, _, notAtSpotCount = GetCupServerStats(entries)
 
         for _, e in ipairs(entries) do
             if e.job == tostring(game.JobId) then
@@ -1415,7 +1472,10 @@ task.spawn(function()
         end
 
         local unjoinedColor = (unjoinedCount == 0) and "#4ade80" or "#facc15"
-        local unjoinedText = ("<font color='%s'><b>%d acc</b></font>"):format(unjoinedColor, unjoinedCount)
+        local spotColor = (notAtSpotCount == 0) and "#4ade80" or "#facc15"
+        local unjoinedText = ("<font color='%s'><b>%d</b></font> | Chưa tới điểm: <font color='%s'><b>%d</b></font>"):format(
+            unjoinedColor, unjoinedCount, spotColor, notAtSpotCount
+        )
 
         local eliteKills = Kills()
         local eliteColor = (eliteKills >= 30 or Has("Yama")) and "#4ade80" or "#facc15"

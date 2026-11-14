@@ -13,12 +13,22 @@ local S = {
 }
 G._Indra = S
 
-local HAKI, SPEED, DIR = "znwfhkjbc", 190, "IndraSync"
+local HAKI_ACCS = {
+    ["znwfhkjbc"] = true,
+    ["akvqxrmpt"] = true,
+}
+local SPEED, DIR = 190, "IndraSync"
+
 local function Svc(n) return game:GetService(n) end
 local Players, RS, TS, HS, CS, RunS, TelS = Svc("Players"), Svc("ReplicatedStorage"), Svc("TweenService"), Svc("HttpService"), Svc("CollectionService"), Svc("RunService"), Svc("TeleportService")
 local LP = Players.LocalPlayer
 local V3, CF = Vector3.new, CFrame.new
-local isHaki = LP.Name:lower() == HAKI
+
+local function IsHakiName(name)
+    return HAKI_ACCS[tostring(name or ""):lower()] == true
+end
+
+local isHaki = IsHakiName(LP.Name)
 pcall(makefolder, DIR)
 
 local P = {
@@ -485,7 +495,7 @@ local function MarkServerAnti(jobId, durationSeconds)
     end)
 end
 
--- Đọc danh sách các acc đang online (cập nhật trong vòng 60s)
+-- Đọc danh sách các acc đang online nội bộ máy (cập nhật trong vòng 60s)
 local function Entries()
     local o = {}
     local ok, fl = pcall(listfiles, DIR)
@@ -603,7 +613,7 @@ local function GetServerCupHolderFromFile()
     return #holders > 0, holders
 end
 
--- Thống kê acc online và số acc Clone chưa nằm trong bất kỳ server Cup nào
+-- Thống kê acc online nội bộ và số acc Clone chưa nằm trong bất kỳ server Cup nào
 local function GetCupServerStats(entriesList)
     local entries = entriesList or Entries()
     local myJob = tostring(game.JobId)
@@ -622,7 +632,7 @@ local function GetCupServerStats(entriesList)
     local unjoinedCount = 0
     local unjoinedNames = {}
     for _, e in ipairs(entries) do
-        if not e.isHaki then
+        if not e.isHaki and not IsHakiName(e.name) then
             local eJob = tostring(e.job or "")
             local inAnyCupServer = (eJob ~= "" and cupJobs[eJob] == true)
                 or (cupJobs[myJob] == true and Players:FindFirstChild(e.name) ~= nil)
@@ -641,7 +651,7 @@ local function CheckLateJoinerConflict()
     local myJoin = tonumber(S.joinTime) or os.time()
 
     for _, e in ipairs(Entries()) do
-        if e.name ~= LP.Name and not e.isHaki and e.job == myJob and Players:FindFirstChild(e.name) then
+        if e.name ~= LP.Name and not e.isHaki and not IsHakiName(e.name) and e.job == myJob and Players:FindFirstChild(e.name) then
             local otherJoin = tonumber(e.joinTime) or 0
             if myJoin > otherJoin or (myJoin == otherJoin and LP.Name > e.name) then
                 return true, e.name
@@ -910,7 +920,7 @@ local function HopLow(why)
     end)
 end
 
--- ============ haki acc ============
+-- ============ haki acc (znwfhkjbc & akvqxrmpt) ============
 local function HakiStep()
     if not Need(3) then return end
 
@@ -1254,17 +1264,20 @@ local function CloneStep()
             return WaitAtSpot(true, true, { LP.Name }, 0)
         end
 
-        local zn = false
+        local hakiInServer = false
         for _, pl in ipairs(Players:GetPlayers()) do
-            if pl.Name:lower() == HAKI then zn = true end
+            if IsHakiName(pl.Name) then
+                hakiInServer = true
+                break
+            end
         end
 
         local padsReady = PadsAll()
         local isFullServer = (#Players:GetPlayers() >= 12)
         local unjoinedCount = GetCupServerStats()
 
-        -- Nếu số acc online chưa vào server Cup xuống 0 -> spawn luôn không cần đợi full 12/12
-        if padsReady and not zn and (isFullServer or unjoinedCount == 0) then
+        -- Nếu số acc online nội bộ chưa vào server Cup xuống 0 -> spawn luôn không cần đợi full 12/12
+        if padsReady and not hakiInServer and (isFullServer or unjoinedCount == 0) then
             Equip("God's Chalice")
             if Go(P.Detect, nil, "Tới bệ Summon Indra") then
                 local r = Root()
@@ -1342,7 +1355,8 @@ local function Lbl(parent, sz, pos, txt, size, font)
     return l
 end
 
-Lbl(f, UDim2.new(1, -40, 0, 24), UDim2.new(0, 10, 0, 4), "AUTO INDRA  |  " .. (isHaki and "HAKI ACC" or "CLONE ACC"), 13, Enum.Font.GothamBold)
+local roleTitle = isHaki and ("HAKI (" .. LP.Name .. ")") or "CLONE ACC"
+Lbl(f, UDim2.new(1, -40, 0, 24), UDim2.new(0, 10, 0, 4), "AUTO INDRA  |  " .. roleTitle, 13, Enum.Font.GothamBold)
 local body = Lbl(f, UDim2.new(1, -20, 1, -34), UDim2.new(0, 10, 0, 30), "", 12, Enum.Font.Gotham)
 
 local x = Instance.new("TextButton", f)
@@ -1364,12 +1378,15 @@ x.MouseButton1Click:Connect(Unload)
 
 task.spawn(function()
     while S.Run do
-        local pd, zn = {}, false
+        local pd, hakiHere = {}, false
         for _, p in ipairs(PADS) do
             pd[#pd + 1] = ("<font color='%s'>%s</font>"):format(PadOpen(p) and "#4ade80" or "#f87171", p[1])
         end
         for _, pl in ipairs(Players:GetPlayers()) do
-            if pl.Name:lower() == HAKI then zn = true end
+            if IsHakiName(pl.Name) then
+                hakiHere = true
+                break
+            end
         end
 
         local entries = Entries()
@@ -1423,7 +1440,7 @@ task.spawn(function()
             "Elite: %s   |   Chest SV: <b>%d/30</b>\n" ..
             "Online Indra: <font color='#38bdf8'><b>%d acc</b></font> (Tại đây: <b>%d</b>)\n" ..
             "Chưa vào SV Cup: %s\n" ..
-            "Players: <b>%d/12</b>   |   znwf: %s\n" ..
+            "Players: <b>%d/12</b>   |   Haki SV: %s\n" ..
             "<font color='#9ca3af'>%s</font>"
         ):format(
             table.concat(pd, " | "),
@@ -1437,7 +1454,7 @@ task.spawn(function()
             inThisServer,
             unjoinedText,
             #Players:GetPlayers(),
-            zn and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>KHÔNG</font>",
+            hakiHere and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>KHÔNG</font>",
             tostring(S.act)
         )
         task.wait(0.5)

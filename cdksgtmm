@@ -18,8 +18,31 @@ G.AutoConfig = G.AutoConfig or { GetMM = true, GetCDK = true, GetSGT = true }
 
 local cr = cloneref or function(o) return o end
 local function Svc(n) return cr(game:GetService(n)) end
-local Players, RS, RunService, TweenService, HttpService, TeleportService =
-    Svc "Players", Svc "ReplicatedStorage", Svc "RunService", Svc "TweenService", Svc "HttpService", Svc "TeleportService"
+local Players, RS, RunService, TweenService, HttpService, TeleportService, Lighting =
+    Svc "Players", Svc "ReplicatedStorage", Svc "RunService", Svc "TweenService", Svc "HttpService", Svc "TeleportService", Svc "Lighting"
+
+-- Kiểm tra Full Moon hợp lệ: Bắt buộc có MoonTextureId 9709149431 VÀ đang trời tối (18:00 -> trước 05:00)
+local function CheckFullMoonNight()
+    local clock = Lighting.ClockTime
+    local isNight = (clock >= 18 or clock < 5)
+    local sky = Lighting:FindFirstChildOfClass("Sky")
+    if not sky then
+        return nil, string.format("Chưa tải xong Sky trong Lighting (ClockTime: %.2f)", clock), 0
+    end
+
+    local moonId = tostring(sky.MoonTextureId or "")
+    local hasFullMoonTex = moonId:find("9709149431", 1, true) ~= nil
+    if not hasFullMoonTex then
+        return false, string.format("Không phải Full Moon (MoonTextureId: %s, ClockTime: %.2f)", moonId, clock), 0
+    end
+
+    if not isNight then
+        return false, string.format("Có texture Full Moon (9709149431) nhưng đang trời sáng (ClockTime: %.2f - ngoài khung 18:00-05:00)", clock), 0
+    end
+
+    local remMin = (5 - clock) % 24
+    return true, string.format("Full Moon hợp lệ (Trời tối, ClockTime: %.2f, còn ~%.1f phút)", clock, remMin), remMin
+end
 repeat task.wait() until Players.LocalPlayer
 local LP = Players.LocalPlayer
 local V3, CF = Vector3.new, CFrame.new
@@ -177,8 +200,9 @@ local function Say(act)
     if act then S.act = act end
     local cdkTag = tostring(S.cdkStatus or "")
     local farmTag = tostring(S.farmStatus or "")
+    local sgtTag = tostring(S.sgtStatus or "")
     local tag = S.Hopping and " [HOP LOW <=7P]" or (S.RK and (" [RK-HOP: " .. tostring(G._RKLbl or "") .. "]") or (S.Main and " [RK-MAIN]" or (S.FragFarm and " [FARM-FRAG]" or "")))
-    lb.Text = ("[%s]%s%s %s%s"):format(tostring(S.cur or "Auto"), cdkTag, farmTag, tostring(S.act or ""), tag)
+    lb.Text = ("[%s]%s%s%s %s%s"):format(tostring(S.cur or "Auto"), cdkTag, farmTag, sgtTag, tostring(S.act or ""), tag)
 end
 
 local SEA = { [2753915549] = 1, [4442272183] = 2, [79091703265657] = 2, [7449423635] = 3, [100117331123089] = 3 }
@@ -491,6 +515,24 @@ local function Equip(name)
     if not h then return end
     if not c:FindFirstChild("HasBuso") then Inv("Buso") end
     local t = c:FindFirstChildOfClass("Tool")
+    if S.cur == "CDK - Boss Cuối" then
+        if t and (t.Name == "Yama" or t.Name == "Tushita") then return t end
+        local b = LP.Backpack:FindFirstChild("Tushita") or LP.Backpack:FindFirstChild("Yama")
+        if not b and os.clock() - lastLoad > 1 then
+            lastLoad = os.clock()
+            Inv("LoadItem", "Tushita")
+            b = LP.Backpack:WaitForChild("Tushita", 0.4) or LP.Backpack:FindFirstChild("Yama")
+            if not b then
+                Inv("LoadItem", "Yama")
+                b = LP.Backpack:WaitForChild("Yama", 0.4)
+            end
+        end
+        if b and not S.noAttack then
+            h:EquipTool(b)
+            return b
+        end
+        return nil
+    end
     if name then
         if name ~= "Sword" then
             if t and t.Name == name then return t end
@@ -637,7 +679,8 @@ conn = RunService.Stepped:Connect(function()
     local cnt = 0
     for _, m in ipairs(workspace.Enemies:GetChildren()) do
         local mh, mp = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart")
-        if m ~= t and mh and mp and mh.Health > 0 and cnt < 8 and not m.Name:lower():find("reaper", 1, true) and (mp.Position - p.Position).Magnitude <= 350 then
+        local mn = m.Name:lower()
+        if m ~= t and mh and mp and mh.Health > 0 and cnt < 8 and not mn:find("reaper", 1, true) and not mn:find("jack o", 1, true) and (mp.Position - p.Position).Magnitude <= 350 then
             cnt += 1
             mp.CFrame, mp.CanCollide, mh.PlatformStand = p.CFrame, false, true
         end
@@ -712,13 +755,22 @@ local function Boss(pats, at)
     return true
 end
 
-local function Farm(c, rad, lbl)
+local function IsIgnoredMob(name, ignore)
+    if not ignore then return false end
+    local n = tostring(name or ""):lower()
+    for _, pat in ipairs(ignore) do
+        if n:find(pat, 1, true) then return true end
+    end
+    return false
+end
+
+local function Farm(c, rad, lbl, ignore)
     local r = Root()
     if not r then return false end
     local best, bp, bd
     for _, m in ipairs(workspace.Enemies:GetChildren()) do
         local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart")
-        if h and p and h.Health > 0 and (p.Position - c).Magnitude <= rad then
+        if h and p and h.Health > 0 and not IsIgnoredMob(m.Name, ignore) and (p.Position - c).Magnitude <= rad then
             local d = (p.Position - r.Position).Magnitude
             if not bd or d < bd then best, bp, bd = m, p, d end
         end
@@ -1609,6 +1661,9 @@ end
 local function SGT()
     S.noAttack = false
     local ecto, df, bones = Cnt("Ectoplasm"), Cnt("Dark Fragment"), math.max(Cnt("Bones"), Cnt("Bone"))
+    S.sgtStatus = string.format(" [SGT NL: Ecto %d/250 | DF %d/1 | Bones %d/500]", ecto, df, bones)
+    Say()
+
     if df < 1 and ecto >= 250 then
         if G._RKHop == game.JobId and G._RKLbl == "Skull Guitar" then
             return HopLow("Đã đủ 250 Ectoplasm -> Hop Low refresh tìm Darkbeard")
@@ -1628,6 +1683,7 @@ local function SGT()
     if ecto >= 250 and df >= 1 and bones >= 500 then
         local frags = GetDataNum("Fragments")
         if frags < 5000 then
+            S.sgtStatus = string.format(" [SGT Frag: %d/5000]", frags)
             if S.RK or S.Main then
                 return HopLow(("Đủ 3 nguyên liệu SGT nhưng thiếu Fragment (%d/5000) -> Hop Low farm Fragment"):format(frags))
             end
@@ -1655,39 +1711,86 @@ local function SGT()
             S.FragTarget = nil
             return HopLow("Đã đủ 5,000 Fragment -> Hop Low để lấy Skull Guitar")
         end
+
+        if not Need(3) then return end
+
         local jid = tostring(game.JobId)
         local now = os.clock()
-        if S.SGTNearJob ~= jid then
-            S.SGTNearJob = jid
-            S.SGTNearAcc = 0
-            S.SGTNearLast = now
-        end
-        local dt = math.min(now - (S.SGTNearLast or now), 1)
-        S.SGTNearLast = now
+        local isFM, fmDetail, fmRemMin = CheckFullMoonNight()
 
-        local r = Root()
-        local nearPl, nearDist = nil, nil
-        if r then
-            for _, pl in ipairs(Players:GetPlayers()) do
-                if pl ~= LP and pl.Character then
-                    local pr = pl.Character:FindFirstChild("HumanoidRootPart")
-                    if pr then
-                        local dist = (pr.Position - r.Position).Magnitude
-                        if dist <= 500 then
-                            nearPl, nearDist = pl, dist
-                            break
+        if G._RKHop == game.JobId and G._RKLbl == "Skull Guitar" then
+            if S.SGTFinalJob ~= jid then
+                S.SGTFinalJob = jid
+                S.SGTFinalStart = now
+            end
+
+            local elapsed = now - (S.SGTFinalStart or now)
+            if not isFM then
+                if elapsed >= 60 then
+                    S.SGTFinalStart = now
+                    return HopLow(("Đủ 4 NL SGT, chạy RealKidHop sau 1p chưa có Full Moon (%s) -> Hop Low"):format(fmDetail))
+                end
+                local rem60 = math.max(0, 60 - elapsed)
+                S.sgtStatus = string.format(" [SGT: Đang chạy RK-Hop tìm FM (Hop sau: %ds)]", math.ceil(rem60))
+                Say()
+            else
+                if elapsed >= 600 then
+                    S.SGTFinalStart = now
+                    return HopLow("Đủ 4 nguyên liệu SGT và chạy RealKidHop quá 10 phút -> Hop Low")
+                end
+
+                if S.SGTNearJob ~= jid then
+                    S.SGTNearJob = jid
+                    S.SGTNearAcc = 0
+                    S.SGTNearLast = now
+                end
+                local dt = math.min(now - (S.SGTNearLast or now), 1)
+                S.SGTNearLast = now
+
+                local r = Root()
+                local nearPl, nearDist = nil, nil
+                if r then
+                    for _, pl in ipairs(Players:GetPlayers()) do
+                        if pl ~= LP and pl.Character then
+                            local pr = pl.Character:FindFirstChild("HumanoidRootPart")
+                            if pr then
+                                local dist = (pr.Position - r.Position).Magnitude
+                                if dist <= 500 then
+                                    nearPl, nearDist = pl, dist
+                                    break
+                                end
+                            end
                         end
                     end
                 end
-            end
-        end
 
-        if nearPl then
-            S.SGTNearAcc = (S.SGTNearAcc or 0) + dt
-            if S.SGTNearAcc >= 55 then
-                S.SGTNearAcc = 0
-                return HopLow(("Đủ 4 nguyên liệu SGT nhưng có %s ở gần (%.0fm) tích lũy %.0fs/60s -> Hop Low"):format(nearPl.Name, nearDist, 55))
+                if nearPl then
+                    S.SGTNearAcc = (S.SGTNearAcc or 0) + dt
+                    if S.SGTNearAcc >= 55 then
+                        S.SGTNearAcc = 0
+                        return HopLow(("Đủ 4 nguyên liệu SGT nhưng có %s ở gần (%.0fm) tích lũy %.0fs/60s -> Hop Low"):format(nearPl.Name, nearDist, 55))
+                    end
+                end
+
+                local rem10m = math.max(0, 600 - elapsed)
+                local min10 = math.floor(rem10m / 60)
+                local sec10 = math.floor(rem10m % 60)
+
+                if nearPl then
+                    local remNear = math.max(0, 55 - (S.SGTNearAcc or 0))
+                    local minNear = math.floor(remNear / 60)
+                    local secNear = math.floor(remNear % 60)
+                    S.sgtStatus = string.format(" [SGT Hop sau: %dp%02ds (Gần %s) | Max: %dp%02ds | FM: ~%.1fp]", minNear, secNear, nearPl.Name, min10, sec10, fmRemMin)
+                else
+                    S.sgtStatus = string.format(" [SGT Hop sau: %dp%02ds | FM còn: ~%.1fp]", min10, sec10, fmRemMin)
+                end
+                Say()
             end
+        else
+            S.SGTFinalJob = nil
+            S.SGTFinalStart = nil
+            S.sgtStatus = " [SGT: Đang bật RealKidHop (GuitarEnabled)...]"
+            Say()
         end
     end
     Hop(nil, { GuitarEnabled = true, SearchEnabled = false })
@@ -1708,12 +1811,96 @@ local function QS(v)
     return nil, math.min(math.max(v, 0), 3)
 end
 
+local hellTried, hellCount, inHell = {}, 0, false
 local function Dim(n)
     local d = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild(n)
     local sp, r = d and d:FindFirstChild("Spawn"), Root()
-    if not (sp and r and (r.Position - sp.Position).Magnitude <= 1500) then return false end
+    if not (sp and r and (r.Position - sp.Position).Magnitude <= 1500) then
+        if n == "HellDimension" and inHell then
+            table.clear(hellTried)
+            hellCount = 0
+            inHell = false
+        end
+        return false
+    end
     S.noAttack = false
+
+    local function HasDimMobs()
+        for _, m in ipairs(workspace.Enemies:GetChildren()) do
+            local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart")
+            if h and p and h.Health > 0 and (p.Position - sp.Position).Magnitude <= 800 then
+                return true
+            end
+        end
+        return false
+    end
+
     if Farm(sp.Position, 800, "Đang diệt quái trong " .. n) then return true end
+
+    if n == "HellDimension" then
+        inHell = true
+        if hellCount < 3 then
+            local bestP, bestPos, bestDist = nil, nil, math.huge
+            for _, x in ipairs(d:GetDescendants()) do
+                if x:IsA("ProximityPrompt") and x.Enabled and not hellTried[x] then
+                    local okP, piv = pcall(function() return x.Parent:GetPivot() end)
+                    local pos = okP and piv and piv.Position
+                    if pos then
+                        local dist = (r.Position - pos).Magnitude
+                        if dist < bestDist then
+                            bestP, bestPos, bestDist = x, pos, dist
+                        end
+                    end
+                end
+            end
+            if bestP and bestPos then
+                if Go(bestPos, HasDimMobs, ("HellDimension: Đang tới đuốc (%d/3)"):format(hellCount + 1)) then
+                    r = Root()
+                    if r and (r.Position - bestPos).Magnitude <= 25 then
+                        bestP.HoldDuration = 0
+                        pcall(fireproximityprompt, bestP)
+                        hellTried[bestP] = true
+                        hellCount += 1
+                        Say(("HellDimension: Đã thắp đuốc %d/3, chờ quái (1s)..."):format(hellCount))
+                        local t0 = os.clock()
+                        while S.Run and os.clock() - t0 < 1 do
+                            if HasDimMobs() then break end
+                            task.wait(0.1)
+                        end
+                    end
+                end
+                return true
+            end
+        end
+
+        local e = d:FindFirstChild("Exit")
+        if e then
+            local pos = e:GetPivot().Position
+            Say("HellDimension: Đã qua 3 đuốc không có quái -> Đang tới cửa ra...")
+            if Go(pos, HasDimMobs, "HellDimension: Đang tới cửa ra") then
+                r = Root()
+                if r and S.Run then
+                    Float(false)
+                    r.CFrame = CF(pos)
+                    task.wait(0.8)
+                    if S.Run then Float(true) end
+                end
+            end
+        end
+
+        r = Root()
+        if r and (r.Position - sp.Position).Magnitude <= 1500 and not HasDimMobs() then
+            Say("HellDimension: Chưa ra được cửa -> Làm lại 1 vòng 3 đuốc...")
+            table.clear(hellTried)
+            hellCount = 0
+        else
+            table.clear(hellTried)
+            hellCount = 0
+            inHell = false
+        end
+        return true
+    end
+
     for _, x in ipairs(d:GetDescendants()) do
         if x:IsA("ProximityPrompt") and x.Enabled then
             if Go(x.Parent:GetPivot().Position, nil, "Đang thắp đuốc trong " .. n) then
@@ -1870,17 +2057,18 @@ local function T1()
     end
 end
 
+local RAID_BLACKLIST = { "jack o' lantern", "jack o" }
 local function RaidMobs()
     for _, m in ipairs(workspace.Enemies:GetChildren()) do
         local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart")
-        if h and p and h.Health > 0 and (p.Position - P.RaidChk).Magnitude <= 2200 then return true end
+        if h and p and h.Health > 0 and not IsIgnoredMob(m.Name, RAID_BLACKLIST) and (p.Position - P.RaidChk).Magnitude <= 2200 then return true end
     end
     return false
 end
 
 local function T2()
     S.noAttack = false
-    if not Farm(P.RaidChk, 2200, nil) then Search("Pirate Raid", P.Raid, nil, RaidMobs) end
+    if not Farm(P.RaidChk, 2200, nil, RAID_BLACKLIST) then Search("Pirate Raid", P.Raid, nil, RaidMobs) end
 end
 
 local function T3()
@@ -1902,7 +2090,9 @@ end
 
 local function Final()
     S.noAttack = false
-    S.weapon = nil
+    local cdkSw = InBag("Yama") and "Yama" or "Tushita"
+    S.weapon = cdkSw
+    Bag(cdkSw, true)
     Inv("CDKQuest", "Progress", "Good")
     Inv("CDKQuest", "Progress", "Evil")
     Inv("CDKQuest", "StartTrial", "Boss")
@@ -2001,7 +2191,9 @@ local function CDK()
         local step = "CDK - Boss Cuối"
         if S.RK and S.RK ~= step then return HopLow("Đã xong " .. tostring(S.RK) .. " -> Hop Low qua " .. step) end
         S.cur = step
-        Bag("Tushita")
+        local cdkSw = InBag("Yama") and "Yama" or "Tushita"
+        S.weapon = cdkSw
+        Bag(cdkSw, true)
         Final()
     end
 end
@@ -2012,10 +2204,10 @@ local STEPS = {
     { "GetMM", "Mirror Fractal", Fractal }, { "GetSGT", "Skull Guitar", SGT }, { "GetCDK", "Cursed Dual Katana", CDK },
 }
 local function Step()
-    if S.cur ~= "CDK - Tushita Q3" then
+    if S.cur ~= "CDK - Tushita Q3" and S.cur ~= "CDK - Boss Cuối" then
         S.weapon = nil
     end
-    S.target, S.cdkStatus, S.farmStatus = nil, nil, nil
+    S.target, S.cdkStatus, S.farmStatus, S.sgtStatus = nil, nil, nil, nil
     if not EnsureSwordStat() then return end
     local cf = G.AutoConfig
     if (cf.GetMM and not Has("Valkyrie Helm")) or (cf.GetCDK and not Has("Tushita")) then return Indra() end

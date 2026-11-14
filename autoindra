@@ -1178,27 +1178,47 @@ local function HuntLongma()
     end
 end
 
-local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList, unjoinedCount)
-    local needTushitaTorch = not Has("Tushita") and not Door()
+local function HasHakiInServer()
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if IsHakiName(pl.Name) then
+            return true
+        end
+    end
+    return false
+end
+
+local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList, unjoinedCount, hakiInServer)
+    local needTushitaTorch = Has("Valkyrie Helm") and not Has("Tushita") and not Door()
     local targetPos = P.Spot
     local holderStr = (cupHoldersList and #cupHoldersList > 0) and table.concat(cupHoldersList, ",") or "Cup"
     local desc
     if isHolder then
-        desc = ("Đợi ở Sea Castle (Chưa vào SV Cup: %d acc)"):format(unjoinedCount or 0)
+        desc = ("Đợi ở Sea Castle (Chưa vào SV Cup: %d acc%s)"):format(
+            unjoinedCount or 0,
+            hakiInServer and " | Chờ Haki rời SV" or ""
+        )
     else
         desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
     end
 
     if not isHolder and serverHasCup and needTushitaTorch then
         targetPos = P.Hydra
-        desc = "Đợi ở Hydra chờ Tushita (Cup: " .. holderStr .. ")"
+        desc = "Đợi ở Hydra chờ Torch (Cup: " .. holderStr .. ")"
     end
 
     local r = Root()
     if r and (r.Position - targetPos).Magnitude > 25 then
         Go(targetPos, function()
-            local hasCupNow = GetServerCupHolderFromFile()
-            return Find(INDRA) ~= nil or (not isHolder and not hasCupNow)
+            if Find(INDRA) ~= nil then return true end
+            if isHolder then
+                local canSpawnNow = PadsAll()
+                    and not HasHakiInServer()
+                    and (#Players:GetPlayers() >= 12 or GetCupServerStats() == 0)
+                return canSpawnNow or InBag("God's Chalice") == nil
+            else
+                local hasCupNow = GetServerCupHolderFromFile()
+                return not hasCupNow
+            end
         end, desc)
     else
         Say(desc .. (" [%d/12]"):format(#Players:GetPlayers()))
@@ -1219,15 +1239,26 @@ local function CloneStep()
     if not Need(3) then return end
 
     local doorOpened = Door()
-
-    -- 1. Đã có Valkyrie Helm, thiếu Tushita và cửa Tushita đã mở -> đi thẳng đánh Longma
     local myCup = InBag("God's Chalice") ~= nil
     local summoning = S.sumT and (os.clock() - S.sumT < 35)
+
+    -- Ưu tiên 2 (nếu đã có Valkyrie Helm và đang cầm sẵn Holy Torch trong túi thì thắp đuốc mở cửa ngay)
+    if not nh and nt and not doorOpened and InBag("Holy Torch") then
+        Say("Thắp 5 đuốc Tushita")
+        for i = 1, 5 do
+            Inv("TushitaProgress", "Torch", i)
+            task.wait(0.2)
+        end
+        Door(true)
+        return
+    end
+
+    -- Ưu tiên 3: Đã có Valkyrie Helm + đã lấy Torch (mở cửa) -> đi thẳng kill Longma
     if not nh and nt and doorOpened and not myCup and not summoning then
         return HuntLongma()
     end
 
-    -- 2. Nếu Rip Indra đang xuất hiện trong server
+    -- Khi Rip Indra đang xuất hiện (Thứ tự ưu tiên: Valkyrie Helm -> lấy Torch -> kill Longma)
     if Find(INDRA) then
         if nh then
             Boss(INDRA, P.Castle)
@@ -1256,27 +1287,20 @@ local function CloneStep()
         return
     end
 
-    -- 3. Nếu acc này đang cầm Cup hoặc vừa summon
+    -- Nếu acc này đang cầm Cup hoặc vừa summon -> tween về Sea Castle (P.Spot) để đợi
     if myCup or summoning then
         UpdatePresence()
         if summoning then
             Say("Đợi Rip Indra xuất hiện...")
-            return WaitAtSpot(true, true, { LP.Name }, 0)
+            return WaitAtSpot(true, true, { LP.Name }, 0, false)
         end
 
-        local hakiInServer = false
-        for _, pl in ipairs(Players:GetPlayers()) do
-            if IsHakiName(pl.Name) then
-                hakiInServer = true
-                break
-            end
-        end
-
+        local hakiInServer = HasHakiInServer()
         local padsReady = PadsAll()
         local isFullServer = (#Players:GetPlayers() >= 12)
         local unjoinedCount = GetCupServerStats()
 
-        -- Nếu số acc online nội bộ chưa vào server Cup xuống 0 -> spawn luôn không cần đợi full 12/12
+        -- Đủ 3 pad + không có acc Haki trong server + (12/12 hoặc acc chưa vào SV Cup = 0) thì spawn
         if padsReady and not hakiInServer and (isFullServer or unjoinedCount == 0) then
             Equip("God's Chalice")
             if Go(P.Detect, nil, "Tới bệ Summon Indra") then
@@ -1291,12 +1315,12 @@ local function CloneStep()
                 UpdatePresence()
             end
         else
-            WaitAtSpot(true, true, { LP.Name }, unjoinedCount)
+            WaitAtSpot(true, true, { LP.Name }, unjoinedCount, hakiInServer)
         end
         return
     end
 
-    -- 4. Nếu acc này không cầm Cup
+    -- Nếu acc này không cầm Cup
     local serverHasCup, cupHolders = GetServerCupHolderFromFile()
     if serverHasCup then
         return WaitAtSpot(false, true, cupHolders)

@@ -205,7 +205,6 @@ local function Fly(pos, abort, desc)
             local curDist = (r.Position - pos).Magnitude
             if desc then Say(("%s (%.0fm)"):format(desc, curDist)) end
 
-            -- Kiểm tra mỗi 0.22s xem nhân vật có bị giật ngược về vị trí verified spot không
             if os.clock() - checkT >= 0.22 then
                 checkT = os.clock()
                 if curDist >= lastDist - 8 then
@@ -604,20 +603,37 @@ local function GetServerCupHolderFromFile()
     return #holders > 0, holders
 end
 
-local function AllActiveClonesInServer()
+-- Thống kê acc online và số acc Clone chưa nằm trong bất kỳ server Cup nào
+local function GetCupServerStats(entriesList)
+    local entries = entriesList or Entries()
     local myJob = tostring(game.JobId)
-    local cloneCount = 0
-    for _, e in ipairs(Entries()) do
+    local cupJobs = {}
+
+    if InBag("God's Chalice") or (S.sumT and (os.clock() - S.sumT < 35)) then
+        cupJobs[myJob] = true
+    end
+
+    for _, e in ipairs(entries) do
+        if (e.cup or e.summoned) and e.job and e.job ~= "" then
+            cupJobs[tostring(e.job)] = true
+        end
+    end
+
+    local unjoinedCount = 0
+    local unjoinedNames = {}
+    for _, e in ipairs(entries) do
         if not e.isHaki then
-            if not (e.cup and e.job ~= myJob) then
-                cloneCount = cloneCount + 1
-                if e.job ~= myJob or not Players:FindFirstChild(e.name) then
-                    return false
-                end
+            local eJob = tostring(e.job or "")
+            local inAnyCupServer = (eJob ~= "" and cupJobs[eJob] == true)
+                or (cupJobs[myJob] == true and Players:FindFirstChild(e.name) ~= nil)
+            if not inAnyCupServer then
+                unjoinedCount = unjoinedCount + 1
+                table.insert(unjoinedNames, e.name)
             end
         end
     end
-    return cloneCount > 0
+
+    return unjoinedCount, unjoinedNames
 end
 
 local function CheckLateJoinerConflict()
@@ -1152,11 +1168,16 @@ local function HuntLongma()
     end
 end
 
-local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList)
+local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList, unjoinedCount)
     local needTushitaTorch = not Has("Tushita") and not Door()
     local targetPos = P.Spot
     local holderStr = (cupHoldersList and #cupHoldersList > 0) and table.concat(cupHoldersList, ",") or "Cup"
-    local desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
+    local desc
+    if isHolder then
+        desc = ("Đợi ở Sea Castle (Chưa vào SV Cup: %d acc)"):format(unjoinedCount or 0)
+    else
+        desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
+    end
 
     if not isHolder and serverHasCup and needTushitaTorch then
         targetPos = P.Hydra
@@ -1230,7 +1251,7 @@ local function CloneStep()
         UpdatePresence()
         if summoning then
             Say("Đợi Rip Indra xuất hiện...")
-            return WaitAtSpot(true, true, { LP.Name })
+            return WaitAtSpot(true, true, { LP.Name }, 0)
         end
 
         local zn = false
@@ -1240,9 +1261,10 @@ local function CloneStep()
 
         local padsReady = PadsAll()
         local isFullServer = (#Players:GetPlayers() >= 12)
-        local allClonesJoined = AllActiveClonesInServer()
+        local unjoinedCount = GetCupServerStats()
 
-        if padsReady and not zn and (isFullServer or allClonesJoined) then
+        -- Nếu số acc online chưa vào server Cup xuống 0 -> spawn luôn không cần đợi full 12/12
+        if padsReady and not zn and (isFullServer or unjoinedCount == 0) then
             Equip("God's Chalice")
             if Go(P.Detect, nil, "Tới bệ Summon Indra") then
                 local r = Root()
@@ -1256,7 +1278,7 @@ local function CloneStep()
                 UpdatePresence()
             end
         else
-            WaitAtSpot(true, true, { LP.Name })
+            WaitAtSpot(true, true, { LP.Name }, unjoinedCount)
         end
         return
     end
@@ -1307,7 +1329,7 @@ end)
 
 local f = Instance.new("Frame", gui)
 f.Size, f.Position, f.BackgroundColor3, f.BorderSizePixel, f.Active, f.Draggable =
-    UDim2.new(0, 330, 0, 205), UDim2.new(0, 12, 0.5, -102), Color3.fromRGB(20, 20, 26), 0, true, true
+    UDim2.new(0, 330, 0, 222), UDim2.new(0, 12, 0.5, -111), Color3.fromRGB(20, 20, 26), 0, true, true
 Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
 local sk = Instance.new("UIStroke", f)
 sk.Color = Color3.fromRGB(55, 55, 70)
@@ -1355,6 +1377,7 @@ task.spawn(function()
         local inThisServer = 0
         local globalCupHolders = {}
         local serverHasCup, localHolders = GetServerCupHolderFromFile()
+        local unjoinedCount = GetCupServerStats(entries)
 
         for _, e in ipairs(entries) do
             if e.job == tostring(game.JobId) then
@@ -1373,6 +1396,9 @@ task.spawn(function()
         else
             cupStatusText = "<font color='#f87171'>KHÔNG</font>"
         end
+
+        local unjoinedColor = (unjoinedCount == 0) and "#4ade80" or "#facc15"
+        local unjoinedText = ("<font color='%s'><b>%d acc</b></font>"):format(unjoinedColor, unjoinedCount)
 
         local eliteKills = Kills()
         local eliteColor = (eliteKills >= 30 or Has("Yama")) and "#4ade80" or "#facc15"
@@ -1396,6 +1422,7 @@ task.spawn(function()
             "Server Cup (File): %s\n" ..
             "Elite: %s   |   Chest SV: <b>%d/30</b>\n" ..
             "Online Indra: <font color='#38bdf8'><b>%d acc</b></font> (Tại đây: <b>%d</b>)\n" ..
+            "Chưa vào SV Cup: %s\n" ..
             "Players: <b>%d/12</b>   |   znwf: %s\n" ..
             "<font color='#9ca3af'>%s</font>"
         ):format(
@@ -1408,6 +1435,7 @@ task.spawn(function()
             ch.n or 0,
             onlineCount,
             inThisServer,
+            unjoinedText,
             #Players:GetPlayers(),
             zn and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>KHÔNG</font>",
             tostring(S.act)

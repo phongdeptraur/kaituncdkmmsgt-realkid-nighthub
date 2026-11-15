@@ -201,7 +201,15 @@ local function Say(act)
     local cdkTag = tostring(S.cdkStatus or "")
     local farmTag = tostring(S.farmStatus or "")
     local sgtTag = tostring(S.sgtStatus or "")
-    local tag = S.Hopping and " [HOP LOW <=7P]" or (S.RK and (" [RK-HOP: " .. tostring(G._RKLbl or "") .. "]") or (S.Main and " [RK-MAIN]" or (S.FragFarm and " [FARM-FRAG]" or "")))
+    local rkLbl = tostring(G._RKLbl or "")
+    if S.RK and G._RKHop == game.JobId and G._RKHopStart then
+        local lim = (G._RKHopDest == "Dough King") and 1200 or ((G._RKHopDest == "Pirate Raid" or G._RKHopDest == "Soul Reaper" or G._RKHopDest == "Cake Queen") and 300 or nil)
+        if lim then
+            local rem = math.max(0, lim - (os.clock() - G._RKHopStart))
+            rkLbl = string.format("%s - Hop sau %dp%02ds", rkLbl, math.floor(rem / 60), math.floor(rem % 60))
+        end
+    end
+    local tag = S.Hopping and " [HOP LOW <=7P]" or (S.RK and (" [RK-HOP: " .. rkLbl .. "]") or (S.Main and " [RK-MAIN]" or (S.FragFarm and " [FARM-FRAG]" or "")))
     lb.Text = ("[%s]%s%s%s %s%s"):format(tostring(S.cur or "Auto"), cdkTag, farmTag, sgtTag, tostring(S.act or ""), tag)
 end
 
@@ -296,22 +304,50 @@ local function Mas(n)
     return math.max(lv and tonumber(lv.Value) or 0, i and i.m or 0)
 end
 
--- Float / noclip / tween / unload
-local curTw, conn
+-- Float / noclip / tween / unload (chuẩn mượt kiểu RealKid)
+local curTw, conn, hbConn
 local ReleaseServerClaim
+local ReleaseEliteClaim
+
+local function StopTween()
+    if curTw then
+        pcall(function() curTw:Cancel() end)
+        curTw = nil
+    end
+end
 
 local function Float(on)
-    local r = Root()
-    if not r then return end
+    local r, h = Root()
+    if not r then
+        S.Fly = on
+        return
+    end
     local b = r:FindFirstChild("AxF")
+    local g = r:FindFirstChild("AxG")
     if on then
+        if h then
+            h.Sit = false
+            h.PlatformStand = false
+        end
         if not b then
             b = Instance.new("BodyVelocity")
-            b.Name, b.MaxForce, b.Velocity, b.Parent = "AxF", V3(1e9, 1e9, 1e9), V3(), r
+            b.Name, b.MaxForce, b.Velocity, b.P, b.Parent = "AxF", V3(9e9, 9e9, 9e9), V3(), 1e4, r
         end
+        if not g then
+            g = Instance.new("BodyGyro")
+            g.Name, g.MaxTorque, g.P, g.D, g.CFrame, g.Parent = "AxG", V3(9e9, 9e9, 9e9), 9e4, 500, r.CFrame, r
+        end
+        r.AssemblyLinearVelocity = V3()
+        r.AssemblyAngularVelocity = V3()
     else
+        StopTween()
         if b then b:Destroy() end
-        for _, p in ipairs(r.Parent:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide, p.CanTouch = true, true end end
+        if g then g:Destroy() end
+        if r.Parent then
+            for _, p in ipairs(r.Parent:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide, p.CanTouch = true, true end
+            end
+        end
     end
     S.Fly = on
 end
@@ -320,8 +356,10 @@ local function Unload()
     if not S.Run then return end
     S.Run = false; if G._Indra and type(G._Indra.Stop) == "function" then pcall(G._Indra.Stop) end
     if ReleaseServerClaim then pcall(ReleaseServerClaim) end
-    if curTw then pcall(function() curTw:Cancel() end) curTw = nil end
+    if ReleaseEliteClaim then pcall(ReleaseEliteClaim) end
+    StopTween()
     if conn then pcall(function() conn:Disconnect() end) conn = nil end
+    if hbConn then pcall(function() hbConn:Disconnect() end) hbConn = nil end
     pcall(Float, false)
     if gui then pcall(function() gui:Destroy() end) end
     if G._AxiomLite == S then G._AxiomLite = nil end
@@ -333,6 +371,7 @@ local function Fly(pos, abort, desc)
     if not S.Run or S.RK or S.Main or S.FragFarm or S.Hopping then return false end
     local r, h = Root()
     if not r or not h or h.Health <= 0 then return false end
+    StopTween()
     h.Sit = false
     Float(true)
 
@@ -341,12 +380,21 @@ local function Fly(pos, abort, desc)
 
     while S.Run and not S.RK and not S.Main and not S.FragFarm and not S.Hopping do
         r, h = Root()
-        if not r or not h or h.Health <= 0 or (abort and abort()) then return false end
+        if not r or not h or h.Health <= 0 or (abort and abort()) then
+            StopTween()
+            return false
+        end
         local d = (r.Position - pos).Magnitude
         if d <= 15 then
             r.CFrame = CF(pos)
+            r.AssemblyLinearVelocity = V3()
             break
         end
+
+        local flatLook = V3(pos.X, r.Position.Y, pos.Z)
+        local targetCF = (flatLook - r.Position).Magnitude > 1 and CF(pos, pos + (flatLook - r.Position).Unit) or CF(pos)
+        local g = r:FindFirstChild("AxG")
+        if g then g.CFrame = targetCF end
 
         local tw = TweenService:Create(r, TweenInfo.new(d / SPEED, Enum.EasingStyle.Linear), { CFrame = CF(pos) })
         curTw = tw
@@ -357,21 +405,25 @@ local function Fly(pos, abort, desc)
         local rubberbanded = false
 
         while S.Run and tw.PlaybackState == Enum.PlaybackState.Playing do
-            task.wait(0.05)
+            task.wait(0.03)
             r, h = Root()
             if not S.Run or not r or not h or h.Health <= 0 or S.RK or S.Main or S.FragFarm or S.Hopping or (abort and abort()) then
-                tw:Cancel()
+                StopTween()
                 return false
             end
             if S.noAttack then Unequip() end
+            h.Sit = false
             r.AssemblyLinearVelocity = V3()
+            r.AssemblyAngularVelocity = V3()
             local curDist = (r.Position - pos).Magnitude
             if desc then Say(("%s (còn %.0fm)"):format(desc, curDist)) end
 
-            if os.clock() - checkT >= 0.22 then
+            local dt = os.clock() - checkT
+            if dt >= 0.25 then
                 checkT = os.clock()
-                if curDist >= lastDist - 8 then
-                    if snapPos and (r.Position - snapPos).Magnitude < 45 then
+                local minProgress = math.max(12, SPEED * dt * 0.45)
+                if curDist > 22 and (lastDist - curDist) < minProgress then
+                    if snapPos and (r.Position - snapPos).Magnitude < 50 then
                         snapCount = snapCount + 1
                     else
                         snapPos = r.Position
@@ -379,21 +431,22 @@ local function Fly(pos, abort, desc)
                     end
 
                     if snapCount >= 4 then
-                        tw:Cancel()
-                        if S.target then
-                            Float(true)
-                            r.AssemblyLinearVelocity = V3()
-                            task.wait(0.15)
-                        else
-                            Float(false)
-                            Say("Bị giật vị trí 4 lần -> Dừng 1s về Verified Spot...")
-                            local waitT = os.clock()
-                            while S.Run and os.clock() - waitT < 1 do
-                                if S.RK or S.Main or S.FragFarm or S.Hopping or (abort and abort()) then
-                                    return false
-                                end
-                                task.wait(0.05)
+                        StopTween()
+                        -- Giữ nguyên Float(true) để treo nhân vật trên không, tuyệt đối không thả rơi tự do
+                        Float(true)
+                        r.AssemblyLinearVelocity = V3()
+                        if not S.target then
+                            Say("Bị giật vị trí -> Giữ vị trí & đồng bộ lại...")
+                        end
+                        local waitT = os.clock()
+                        local holdDur = S.target and 0.15 or 0.4
+                        while S.Run and os.clock() - waitT < holdDur do
+                            if S.RK or S.Main or S.FragFarm or S.Hopping or (abort and abort()) then
+                                return false
                             end
+                            local crRoot = Root()
+                            if crRoot then crRoot.AssemblyLinearVelocity = V3() end
+                            task.wait(0.03)
                         end
                         snapCount = 0
                         snapPos = nil
@@ -406,17 +459,21 @@ local function Fly(pos, abort, desc)
                         rubberbanded = true
                         break
                     end
-                elseif curDist < lastDist - 25 then
+                elseif (lastDist - curDist) >= minProgress then
                     snapCount = 0
+                    snapPos = nil
                 end
                 lastDist = curDist
             end
         end
 
+        if curTw == tw then curTw = nil end
+
         if not rubberbanded then
             r = Root()
             if S.Run and r and (r.Position - pos).Magnitude <= 25 then
                 r.CFrame = CF(pos)
+                r.AssemblyLinearVelocity = V3()
             end
             break
         end
@@ -594,14 +651,54 @@ local function Attack()
     local c = LP.Character
     local r = c and c:FindFirstChild("HumanoidRootPart")
     if not r or not S.Run or S.Hopping or S.RK or S.Main or S.FragFarm or (G._Indra and G._Indra.Run) then return end
-    local hits, main = {}, nil
-    for _, cont in ipairs({ workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters") }) do
-        for _, m in ipairs(cont and cont:GetChildren() or {}) do
-            if m ~= c and m:IsA("Model") and not m.Name:lower():find("reaper", 1, true) then
-                local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("Head")
-                if h and p and h.Health > 0 and (r.Position - p.Position).Magnitude <= (m == S.target and 120 or 75) then
-                    hits[#hits + 1], hits[#hits + 2] = { m, p }, m
-                    main = main or m:FindFirstChild("Head") or p
+    if S.inDim then
+        local dimMap = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild(S.inDim)
+        local dimSp = dimMap and dimMap:FindFirstChild("Spawn")
+        if not (dimSp and (r.Position - dimSp.Position).Magnitude <= 1500) then
+            S.inDim, S.dimPair, S.isDimBlacklisted, S.onDimAttack = nil, nil, nil, nil
+        end
+    end
+    local hits, main, dimTargets = {}, nil, nil
+    if S.inDim then
+        dimTargets = {}
+        local seen = {}
+        if type(S.dimPair) == "table" then
+            for _, m in ipairs(S.dimPair) do
+                if m and m.Parent and not seen[m] and not (S.isDimBlacklisted and S.isDimBlacklisted(m)) then
+                    local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("Head")
+                    if h and p and h.Health > 0 and (r.Position - p.Position).Magnitude <= 120 then
+                        seen[m] = true
+                        dimTargets[#dimTargets + 1] = { m = m, p = p }
+                    end
+                end
+            end
+        end
+        if #dimTargets < 2 then
+            local enemies = workspace:FindFirstChild("Enemies")
+            for _, m in ipairs(enemies and enemies:GetChildren() or {}) do
+                if #dimTargets >= 2 then break end
+                if m ~= c and m:IsA("Model") and not seen[m] and not (S.isDimBlacklisted and S.isDimBlacklisted(m)) then
+                    local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("Head")
+                    if h and p and h.Health > 0 and (r.Position - p.Position).Magnitude <= 120 then
+                        seen[m] = true
+                        dimTargets[#dimTargets + 1] = { m = m, p = p }
+                    end
+                end
+            end
+        end
+        for _, item in ipairs(dimTargets) do
+            hits[#hits + 1], hits[#hits + 2] = { item.m, item.p }, item.m
+            main = main or item.m:FindFirstChild("Head") or item.p
+        end
+    else
+        for _, cont in ipairs({ workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters") }) do
+            for _, m in ipairs(cont and cont:GetChildren() or {}) do
+                if m ~= c and m:IsA("Model") and not m.Name:lower():find("reaper", 1, true) then
+                    local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("Head")
+                    if h and p and h.Health > 0 and (r.Position - p.Position).Magnitude <= (m == S.target and 120 or 75) then
+                        hits[#hits + 1], hits[#hits + 2] = { m, p }, m
+                        main = main or m:FindFirstChild("Head") or p
+                    end
                 end
             end
         end
@@ -630,8 +727,24 @@ local function Attack()
         end)
     end
     if tool and not S.noAttack then pcall(function() tool:Activate() end) end
+    if S.inDim and dimTargets and #dimTargets > 0 and S.onDimAttack then
+        S.onDimAttack(dimTargets)
+    end
 end
 task.spawn(function() while S.Run do pcall(Attack) task.wait() end end)
+
+hbConn = RunService.Heartbeat:Connect(function()
+    if not S.Run then hbConn:Disconnect() return end
+    local busyExt = S.Hopping or S.RK or S.Main or S.FragFarm or (G._Indra and G._Indra.Run)
+    if S.Fly and not busyExt then
+        local r, hum = Root()
+        if r and hum then
+            hum.Sit = false
+            r.AssemblyLinearVelocity = V3()
+            r.AssemblyAngularVelocity = V3()
+        end
+    end
+end)
 
 conn = RunService.Stepped:Connect(function()
     if not S.Run then conn:Disconnect() return end
@@ -650,10 +763,11 @@ conn = RunService.Stepped:Connect(function()
         local r, hum = Root()
         if r and hum then
             hum.Sit = false
-            if not r:FindFirstChild("AxF") then
+            if not r:FindFirstChild("AxF") or not r:FindFirstChild("AxG") then
                 Float(true)
             end
             r.AssemblyLinearVelocity = V3()
+            r.AssemblyAngularVelocity = V3()
         end
     end
     local t = S.target
@@ -680,7 +794,7 @@ conn = RunService.Stepped:Connect(function()
     for _, m in ipairs(workspace.Enemies:GetChildren()) do
         local mh, mp = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart")
         local mn = m.Name:lower()
-        if m ~= t and mh and mp and mh.Health > 0 and cnt < 8 and not mn:find("reaper", 1, true) and not mn:find("jack o", 1, true) and (mp.Position - p.Position).Magnitude <= 350 then
+        if m ~= t and mh and mp and mh.Health > 0 and cnt < 8 and not (S.isDimBlacklisted and S.isDimBlacklisted(m)) and not mn:find("reaper", 1, true) and not mn:find("jack o", 1, true) and (mp.Position - p.Position).Magnitude <= 350 then
             cnt += 1
             mp.CFrame, mp.CanCollide, mh.PlatformStand = p.CFrame, false, true
         end
@@ -780,20 +894,68 @@ local function Farm(c, rad, lbl, ignore)
     return false
 end
 
--- ============================ BONES / ECTO HEARTBEAT TTL 60s & HOP LOW ============================
+-- ============================ BONES / ECTO / MASTERY ROSTER & 1-HOP SEPARATION ============================
 local VF = "CDKProgress/visited.json"
+local ROSTER_FILE = "CDKProgress/farm_roster.json"
 local TTL_FILES = { "CDKProgress/bones_ttl.json", "RealKidHub/bones_job.json" }
 local BONES_TTL = 60 -- Quá 60s không cập nhật = coi như acc đã offline
+
+-- ============================ ELITE ROSTER & 15-MIN KILLED BLACKLIST (TÁCH BIỆT HOÀN TOÀN) ============================
+local ELITE_ROSTER_FILE = "CDKProgress/elite_roster.json"
+local ELITE_KILLED_BL_FILE = "CDKProgress/elite_killed_bl.json"
+local ELITE_TTL = 60
+local ELITE_BL_TTL = 900 -- Blacklist server đã kill Elite trong 15 phút (900s)
 
 pcall(function()
     if not isfolder("CDKProgress") then makefolder("CDKProgress") end
     if not isfolder("RealKidHub") then makefolder("RealKidHub") end
 end)
 
--- Đọc và dọn các mục đã quá hạn trong file TTL (20s cho đặt chỗ trước, 60s cho acc đang farm)
-local function ReadActiveTTLClaims()
+-- Acc vào trước (joined nhỏ hơn) được ở lại; nếu bằng nhau thì UserId nhỏ hơn ở lại
+local function IsHigherPriority(myJoined, myUid, otherJoined, otherUid)
+    local mj = tonumber(myJoined) or math.huge
+    local oj = tonumber(otherJoined) or math.huge
+    if mj ~= oj then
+        return mj < oj
+    end
+    return (tonumber(myUid) or 0) < (tonumber(otherUid) or 0)
+end
+
+-- Đọc toàn bộ acc đang hoạt động / đang đặt chỗ (key theo UserId để không bao giờ ghi đè lẫn nhau)
+local function ReadFarmRoster()
     local now = os.time()
-    local claims = {}
+    local roster = {}
+
+    pcall(function()
+        if isfile and isfile(ROSTER_FILE) then
+            local raw = readfile(ROSTER_FILE)
+            local ok, dt = pcall(HttpService.JSONDecode, HttpService, raw)
+            if ok and type(dt) == "table" then
+                for uid, info in pairs(dt) do
+                    if type(info) == "table" then
+                        local ts = tonumber(info.time) or 0
+                        local resTs = tonumber(info.reserveTime) or 0
+                        local hasActiveJob = type(info.jobId) == "string" and #info.jobId >= 20 and (now - ts) <= BONES_TTL
+                        local hasValidRes = type(info.reservedJobId) == "string" and #info.reservedJobId >= 20 and (now - resTs) <= 20
+                        if hasActiveJob or hasValidRes then
+                            roster[tostring(uid)] = {
+                                userId = tostring(info.userId or uid),
+                                name = tostring(info.name or ""),
+                                jobId = hasActiveJob and tostring(info.jobId) or "",
+                                reservedJobId = hasValidRes and tostring(info.reservedJobId) or "",
+                                reserveTime = hasValidRes and resTs or 0,
+                                joined = tonumber(info.joined) or ts or now,
+                                time = ts,
+                                mode = tostring(info.mode or ""),
+                                state = hasActiveJob and "active" or "reserving"
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
     for _, path in ipairs(TTL_FILES) do
         pcall(function()
             if isfile and isfile(path) then
@@ -801,26 +963,23 @@ local function ReadActiveTTLClaims()
                 local ok, dt = pcall(HttpService.JSONDecode, HttpService, raw)
                 if ok and type(dt) == "table" then
                     for jid, info in pairs(dt) do
-                        if type(jid) == "string" and #jid >= 20 then
-                            local ts = type(info) == "table" and tonumber(info.time or info.ts or info.timestamp) or tonumber(info)
-                            local uid = type(info) == "table" and tostring(info.userId or info.uid or info.user or "") or ""
-                            local uname = type(info) == "table" and tostring(info.name or info.user or "") or ""
-                            local joined = type(info) == "table" and tonumber(info.joined or ts) or ts
-                            local mode = type(info) == "table" and tostring(info.mode or "") or ""
-                            local state = type(info) == "table" and tostring(info.state or "active") or "active"
-                            local ttlLimit = (state == "reserving") and 20 or BONES_TTL
-                            if ts and (now - ts) <= ttlLimit then
-                                local prev = claims[jid]
-                                if not prev or (joined and prev.joined and joined < prev.joined) then
-                                    claims[jid] = {
-                                        time = ts,
-                                        joined = joined or ts,
-                                        userId = uid,
-                                        name = uname,
-                                        mode = mode,
-                                        state = state
-                                    }
-                                end
+                        if type(jid) == "string" and #jid >= 20 and type(info) == "table" then
+                            local ts = tonumber(info.time or info.ts) or 0
+                            local uid = tostring(info.userId or "")
+                            local state = tostring(info.state or "active")
+                            local limit = (state == "reserving") and 20 or BONES_TTL
+                            if uid ~= "" and (now - ts) <= limit and not roster[uid] then
+                                roster[uid] = {
+                                    userId = uid,
+                                    name = tostring(info.name or ""),
+                                    jobId = (state ~= "reserving") and jid or "",
+                                    reservedJobId = (state == "reserving") and jid or "",
+                                    reserveTime = (state == "reserving") and ts or 0,
+                                    joined = tonumber(info.joined) or ts,
+                                    time = ts,
+                                    mode = tostring(info.mode or ""),
+                                    state = state
+                                }
                             end
                         end
                     end
@@ -828,45 +987,81 @@ local function ReadActiveTTLClaims()
             end
         end)
     end
-    return claims
+
+    return roster
 end
 
-local function WriteActiveTTLClaims(claims)
-    local encoded = HttpService:JSONEncode(claims)
+local function WriteFarmRoster(roster)
+    pcall(writefile, ROSTER_FILE, HttpService:JSONEncode(roster))
+    local legacy = {}
+    for uid, info in pairs(roster) do
+        local targetJid = (info.jobId ~= "" and info.jobId) or info.reservedJobId
+        if targetJid and #targetJid >= 20 then
+            local prev = legacy[targetJid]
+            if not prev or IsHigherPriority(info.joined, uid, prev.joined, prev.userId) then
+                legacy[targetJid] = {
+                    time = math.max(info.time or 0, info.reserveTime or 0),
+                    joined = info.joined,
+                    userId = uid,
+                    name = info.name,
+                    mode = info.mode,
+                    state = (info.jobId ~= "") and "active" or "reserving"
+                }
+            end
+        end
+    end
+    local encoded = HttpService:JSONEncode(legacy)
     for _, path in ipairs(TTL_FILES) do
         pcall(writefile, path, encoded)
     end
 end
 
-local function FormatFarmAccStatus(claims)
-    local list = claims or ReadActiveTTLClaims()
-    local seenM, seenE = {}, {}
-    local mCnt, eCnt = 0, 0
-    for jid, info in pairs(list) do
-        local key = (info.userId ~= "" and info.userId) or (info.name ~= "" and info.name) or jid
-        if info.mode == "Bones/Mastery" and not seenM[key] then
-            seenM[key] = true
+local function ReadActiveTTLClaims()
+    local roster = ReadFarmRoster()
+    local claims = {}
+    for uid, info in pairs(roster) do
+        for _, jid in ipairs({ info.jobId, info.reservedJobId }) do
+            if type(jid) == "string" and #jid >= 20 then
+                local prev = claims[jid]
+                if not prev or IsHigherPriority(info.joined, uid, prev.joined, prev.userId) then
+                    claims[jid] = {
+                        time = math.max(info.time or 0, info.reserveTime or 0),
+                        joined = info.joined,
+                        userId = uid,
+                        name = info.name,
+                        mode = info.mode,
+                        state = (jid == info.jobId) and "active" or "reserving"
+                    }
+                end
+            end
+        end
+    end
+    return claims
+end
+
+local function FormatFarmAccStatus(rosterInput)
+    local list = rosterInput or ReadFarmRoster()
+    local mCnt, bCnt, eCnt = 0, 0, 0
+    for _, info in pairs(list) do
+        if info.mode == "Bones/Mastery" then
             mCnt += 1
-        elseif info.mode == "Ectoplasm" and not seenE[key] then
-            seenE[key] = true
+        elseif info.mode == "Bones" then
+            bCnt += 1
+        elseif info.mode == "Ectoplasm" then
             eCnt += 1
         end
     end
-    return (" [Acc Farm: %d Mastery | %d Ecto]"):format(mCnt, eCnt)
+    return (" [Farm: %d Bones | %d Ecto | %d Mas]"):format(bCnt, eCnt, mCnt)
 end
 
 ReleaseServerClaim = function()
     pcall(function()
-        local claims = ReadActiveTTLClaims()
+        local roster = ReadFarmRoster()
         local myUid = tostring(LP.UserId)
-        local changed = false
-        for jid, info in pairs(claims) do
-            if (jid == tostring(game.JobId) or info.state == "reserving") and (info.userId == myUid or info.name == LP.Name or info.userId == "") then
-                claims[jid] = nil
-                changed = true
-            end
+        if roster[myUid] then
+            roster[myUid] = nil
+            WriteFarmRoster(roster)
         end
-        if changed then WriteActiveTTLClaims(claims) end
     end)
 end
 
@@ -1093,7 +1288,7 @@ local function HopLow(reason, avoidMode)
                 repeat
                     task.wait(0.05)
                     local elapsed = os.clock() - start
-                until not S.Run or completed >= totalPages or elapsed >= 3.5 or (elapsed >= 0.35 and fastFound >= 2)
+                until not S.Run or completed >= totalPages or elapsed >= 3.5 or (elapsed >= 0.45 and fastFound >= 12)
 
                 for _, sv in pairs(byJob) do
                     pool[#pool + 1] = sv
@@ -1128,7 +1323,7 @@ local function HopLow(reason, avoidMode)
                         end
                     end
 
-                    if #pool >= 10 then break end
+                    if #pool >= 15 then break end
                     cursor = data.nextPageCursor
                     if not cursor or cursor == "" then break end
                 end
@@ -1141,68 +1336,94 @@ local function HopLow(reason, avoidMode)
                 end
                 Say("Chưa thấy server <=7 người, đang quét lại...")
             else
-                if isAvoid then
-                    local tLow, tMid, tHigh = {}, {}, {}
-                    for _, sv in ipairs(pool) do
-                        if sv.ping <= 100 then
-                            tLow[#tLow + 1] = sv
-                        elseif sv.ping <= 180 then
-                            tMid[#tMid + 1] = sv
-                        else
-                            tHigh[#tHigh + 1] = sv
-                        end
-                    end
-                    local function shuffle(arr)
-                        for i = #arr, 2, -1 do
-                            local j = math.random(i)
-                            arr[i], arr[j] = arr[j], arr[i]
-                        end
-                    end
-                    shuffle(tLow)
-                    shuffle(tMid)
-                    shuffle(tHigh)
-                    pool = {}
-                    for _, group in ipairs({ tLow, tMid, tHigh }) do
-                        for _, sv in ipairs(group) do
-                            pool[#pool + 1] = sv
-                        end
-                    end
-                else
-                    for i = #pool, 2, -1 do
-                        local j = math.random(i)
-                        pool[i], pool[j] = pool[j], pool[i]
+                local tLow, tMid, tHigh = {}, {}, {}
+                for _, sv in ipairs(pool) do
+                    if sv.ping <= 100 then
+                        tLow[#tLow + 1] = sv
+                    elseif sv.ping <= 180 then
+                        tMid[#tMid + 1] = sv
+                    else
+                        tHigh[#tHigh + 1] = sv
                     end
                 end
-                for i = 1, math.min(#pool, 10) do
+                local function shuffle(arr)
+                    for i = #arr, 2, -1 do
+                        local j = math.random(i)
+                        arr[i], arr[j] = arr[j], arr[i]
+                    end
+                end
+                shuffle(tLow)
+                shuffle(tMid)
+                shuffle(tHigh)
+                pool = {}
+                for _, group in ipairs({ tLow, tMid, tHigh }) do
+                    for _, sv in ipairs(group) do
+                        pool[#pool + 1] = sv
+                    end
+                end
+
+                local myUid = tostring(LP.UserId)
+                for i = 1, math.min(#pool, 8) do
                     if not S.Run then break end
                     local sv = pool[i]
                     if sv.id ~= "" and sv.id ~= tostring(game.JobId) then
-                        local skip = false
+                        local lockedSuccess = true
                         if isAvoid then
-                            local freshClaims = ReadActiveTTLClaims()
-                            local cl = freshClaims[sv.id]
-                            if cl and cl.userId ~= tostring(LP.UserId) and cl.name ~= LP.Name then
-                                skip = true
-                            else
+                            lockedSuccess = false
+                            local rosterNow = ReadFarmRoster()
+                            local conflict = false
+                            for uid, info in pairs(rosterNow) do
+                                if uid ~= myUid and (info.jobId == sv.id or info.reservedJobId == sv.id) then
+                                    conflict = true
+                                    break
+                                end
+                            end
+
+                            if not conflict then
                                 local ts = os.time()
-                                freshClaims[sv.id] = {
-                                    time = ts,
-                                    joined = ts,
-                                    userId = tostring(LP.UserId),
+                                rosterNow[myUid] = {
+                                    userId = myUid,
                                     name = LP.Name,
+                                    jobId = "",
+                                    reservedJobId = sv.id,
+                                    reserveTime = ts,
+                                    joined = ts,
+                                    time = ts,
                                     mode = claimMode,
                                     state = "reserving"
                                 }
-                                WriteActiveTTLClaims(freshClaims)
-                                S.farmStatus = FormatFarmAccStatus(freshClaims)
+                                WriteFarmRoster(rosterNow)
+                                -- Chờ 0.08s rồi đọc lại file để khóa chống trùng tuyệt đối nếu 2 acc đặt cùng mili-giây
+                                task.wait(0.08)
+                                local verifyRoster = ReadFarmRoster()
+                                local wonLock = (verifyRoster[myUid] and verifyRoster[myUid].reservedJobId == sv.id)
+                                if wonLock then
+                                    for uid, info in pairs(verifyRoster) do
+                                        if uid ~= myUid and (info.jobId == sv.id or info.reservedJobId == sv.id) then
+                                            if not IsHigherPriority(ts, myUid, info.reserveTime > 0 and info.reserveTime or info.joined, uid) then
+                                                wonLock = false
+                                                break
+                                            end
+                                        end
+                                    end
+                                end
+
+                                if wonLock then
+                                    lockedSuccess = true
+                                    S.farmStatus = FormatFarmAccStatus(verifyRoster)
+                                    vis[sv.id] = os.time()
+                                    pcall(writefile, VF, HttpService:JSONEncode(vis))
+                                elseif verifyRoster[myUid] then
+                                    verifyRoster[myUid] = nil
+                                    WriteFarmRoster(verifyRoster)
+                                end
                             end
-                            vis[sv.id] = os.time()
-                            pcall(writefile, VF, HttpService:JSONEncode(vis))
                         end
-                        if not skip then
+
+                        if lockedSuccess then
                             Say(("Đang sang server %s (%d/7 người, ~%dms)"):format(sv.id:sub(1, 8), sv.cnt, sv.ping))
                             TeleportToJob(sv.id)
-                            task.wait(0.55)
+                            task.wait(2.2)
                         end
                     end
                 end
@@ -1212,69 +1433,78 @@ local function HopLow(reason, avoidMode)
     end)
 end
 
--- Anti-Colocation & Heartbeat TTL 60s
+-- Anti-Colocation: Acc vào trước ở lại farm, acc vào sau lập tức Hop Low sang server trống đã đặt chỗ
 local function CheckAntiColocation(spotCenter, label)
     local jid = tostring(game.JobId)
     local myUid = tostring(LP.UserId)
     local now = os.time()
+    local roster = ReadFarmRoster()
 
     if S.AntiJob ~= jid then
         S.AntiJob = jid
-        local initClaims = ReadActiveTTLClaims()
-        local myRes = initClaims[jid]
-        if myRes and (myRes.userId == myUid or myRes.name == LP.Name) and myRes.joined then
-            S.AntiJoined = myRes.joined
+        local myEntry = roster[myUid]
+        if myEntry and (myEntry.jobId == jid or myEntry.reservedJobId == jid) and myEntry.joined then
+            S.AntiJoined = myEntry.joined
         else
             S.AntiJoined = now
         end
         S.LastHB = 0
     end
 
-    local claims = ReadActiveTTLClaims()
-    local curClaim = claims[jid]
-    local otherIsBot = curClaim and curClaim.userId ~= "" and curClaim.userId ~= myUid and curClaim.name ~= LP.Name
+    local myJoined = S.AntiJoined or now
 
-    if otherIsBot then
-        local cJoined = curClaim.joined or 0
-        local mJoined = S.AntiJoined or now
-        local shouldYield = (cJoined < mJoined) or (cJoined == mJoined and (tonumber(myUid) or 0) > (tonumber(curClaim.userId) or 0))
-        if shouldYield then
-            HopLow(("Trùng server %s với acc %s (TTL còn %ds) -> Hop Low né"):format(
-                label,
-                tostring(curClaim.name ~= "" and curClaim.name or curClaim.userId),
-                math.max(0, BONES_TTL - (now - (curClaim.time or now)))
-            ), label)
-            return true
+    -- 1. Kiểm tra trong file Roster xem có acc nào trong dàn đang ở cùng JobId này không
+    for uid, info in pairs(roster) do
+        if uid ~= myUid and info.jobId == jid then
+            if not IsHigherPriority(myJoined, myUid, info.joined, uid) then
+                HopLow(("Trùng server %s với acc vào trước %s -> Hop Low né"):format(
+                    label,
+                    tostring(info.name ~= "" and info.name or uid)
+                ), label)
+                return true
+            end
         end
     end
 
-    if os.clock() - (S.LastHB or 0) >= 4.5 then
+    -- 2. Ghi xác nhận tôi đang giữ server này (xóa reservedJobId vì đã vào nơi)
+    if os.clock() - (S.LastHB or 0) >= 2.0 then
         S.LastHB = os.clock()
-        claims[jid] = {
-            time = now,
-            joined = S.AntiJoined or now,
+        roster[myUid] = {
             userId = myUid,
             name = LP.Name,
+            jobId = jid,
+            reservedJobId = "",
+            reserveTime = 0,
+            joined = myJoined,
+            time = now,
             mode = label,
             state = "active"
         }
-        WriteActiveTTLClaims(claims)
+        WriteFarmRoster(roster)
     end
-    S.farmStatus = FormatFarmAccStatus(claims)
+    S.farmStatus = FormatFarmAccStatus(roster)
 
+    -- 3. Kiểm tra người chơi thực tế trong server:
+    -- Nếu là acc cùng dàn -> Acc vào trước ở lại, acc vào sau mới hop. Nếu là người lạ ở bãi -> Hop né.
     local r = Root()
     if r then
+        local atSpot = (not spotCenter) or ((r.Position - spotCenter).Magnitude <= 1000)
         for _, pl in ipairs(Players:GetPlayers()) do
             if pl ~= LP and pl.Character then
                 local pr = pl.Character:FindFirstChild("HumanoidRootPart")
                 if pr then
-                    local nearMe = (pr.Position - r.Position).Magnitude <= 450
-                    local nearSpot = spotCenter and (pr.Position - spotCenter).Magnitude <= 600
+                    local nearMe = atSpot and ((pr.Position - r.Position).Magnitude <= 450)
+                    local nearSpot = spotCenter and ((pr.Position - spotCenter).Magnitude <= 600)
                     if nearMe or nearSpot then
                         local plUid = tostring(pl.UserId)
-                        local isKnownAlt = otherIsBot and (curClaim.userId == plUid or curClaim.name == pl.Name)
-                        if not isKnownAlt or (tonumber(myUid) or 0) > (tonumber(plUid) or 0) then
-                            HopLow(("Phát hiện %s chung bãi %s -> Hop Low né"):format(pl.Name, label), label)
+                        local altInfo = roster[plUid]
+                        if altInfo then
+                            if not IsHigherPriority(myJoined, myUid, altInfo.joined, plUid) then
+                                HopLow(("Nhường bãi %s cho acc vào trước %s -> Hop Low né"):format(label, pl.Name), label)
+                                return true
+                            end
+                        else
+                            HopLow(("Phát hiện người lạ %s chung bãi %s -> Hop Low né"):format(pl.Name, label), label)
                             return true
                         end
                     end
@@ -1285,18 +1515,432 @@ local function CheckAntiColocation(spotCenter, label)
     return false
 end
 
+-- ============================ ELITE ROSTER, 15M BLACKLIST & PRE-RESERVATION HOP ============================
+local function ReadEliteRoster()
+    local now = os.time()
+    local roster = {}
+    pcall(function()
+        if isfile and isfile(ELITE_ROSTER_FILE) then
+            local raw = readfile(ELITE_ROSTER_FILE)
+            local ok, dt = pcall(HttpService.JSONDecode, HttpService, raw)
+            if ok and type(dt) == "table" then
+                for uid, info in pairs(dt) do
+                    if type(info) == "table" then
+                        local ts = tonumber(info.time) or 0
+                        local resTs = tonumber(info.reserveTime) or 0
+                        local hasActiveJob = type(info.jobId) == "string" and #info.jobId >= 20 and (now - ts) <= ELITE_TTL
+                        local hasValidRes = type(info.reservedJobId) == "string" and #info.reservedJobId >= 20 and (now - resTs) <= 20
+                        if hasActiveJob or hasValidRes then
+                            roster[tostring(uid)] = {
+                                userId = tostring(info.userId or uid),
+                                name = tostring(info.name or ""),
+                                jobId = hasActiveJob and tostring(info.jobId) or "",
+                                reservedJobId = hasValidRes and tostring(info.reservedJobId) or "",
+                                reserveTime = hasValidRes and resTs or 0,
+                                joined = tonumber(info.joined) or ts or now,
+                                time = ts,
+                                state = hasActiveJob and "active" or "reserving"
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    return roster
+end
+
+local function WriteEliteRoster(roster)
+    pcall(writefile, ELITE_ROSTER_FILE, HttpService:JSONEncode(roster))
+end
+
+ReleaseEliteClaim = function()
+    pcall(function()
+        local roster = ReadEliteRoster()
+        local myUid = tostring(LP.UserId)
+        if roster[myUid] then
+            roster[myUid] = nil
+            WriteEliteRoster(roster)
+        end
+    end)
+end
+
+local function ReadEliteKilledBL()
+    local now = os.time()
+    local bl = {}
+    local changed = false
+    pcall(function()
+        if isfile and isfile(ELITE_KILLED_BL_FILE) then
+            local raw = readfile(ELITE_KILLED_BL_FILE)
+            local ok, dt = pcall(HttpService.JSONDecode, HttpService, raw)
+            if ok and type(dt) == "table" then
+                for jid, exp in pairs(dt) do
+                    local expNum = tonumber(exp) or 0
+                    if type(jid) == "string" and #jid >= 20 and expNum > now then
+                        bl[jid] = expNum
+                    else
+                        changed = true
+                    end
+                end
+            end
+        end
+    end)
+    if changed then
+        pcall(writefile, ELITE_KILLED_BL_FILE, HttpService:JSONEncode(bl))
+    end
+    return bl
+end
+
+local function BlacklistEliteServer(jobId, duration)
+    local jid = tostring(jobId or "")
+    if #jid < 20 then return end
+    local ttl = tonumber(duration) or ELITE_BL_TTL
+    pcall(function()
+        local bl = ReadEliteKilledBL()
+        local newExp = os.time() + ttl
+        if (bl[jid] or 0) < newExp then
+            bl[jid] = newExp
+            writefile(ELITE_KILLED_BL_FILE, HttpService:JSONEncode(bl))
+        end
+    end)
+end
+
+local function FormatEliteAccStatus(rosterInput)
+    local list = rosterInput or ReadEliteRoster()
+    local cnt = 0
+    for _ in pairs(list) do
+        cnt += 1
+    end
+    return (" [Elite: %d acc]"):format(cnt)
+end
+
+local function HopLowElite(reason)
+    if not S.Run or S.Hopping then return end
+    S.Hopping = true
+    local finalReason = reason or "Đang quét server tìm Elite..."
+    LogHopReason("HopLowElite [Đặt trước & Né SV Elite]: " .. finalReason)
+    ReleaseEliteClaim()
+    Float(false)
+    Say(finalReason)
+
+    local function TeleportToJob(jobId)
+        if not jobId or jobId == "" or jobId == tostring(game.JobId) then return end
+        local browser = RS:FindFirstChild("__ServerBrowser")
+        if browser then
+            local ok = pcall(function() browser:InvokeServer("teleport", jobId) end)
+            if not ok then
+                pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LP) end)
+            end
+        else
+            pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LP) end)
+        end
+    end
+
+    task.spawn(function()
+        local vis = { [tostring(game.JobId)] = os.time() }
+        local myUid = tostring(LP.UserId)
+
+        while S.Run do
+            local now = os.time()
+            for k, v in pairs(vis) do
+                if now - v > 300 then vis[k] = nil end
+            end
+
+            -- Chỉ đọc elite_roster & elite_killed_bl -> thoải mái hop vào server đang farm Bones/Mastery
+            local eliteRoster = ReadEliteRoster()
+            local killedBL = ReadEliteKilledBL()
+            local busyEliteJobs = {}
+            for uid, info in pairs(eliteRoster) do
+                if uid ~= myUid then
+                    if info.jobId ~= "" then busyEliteJobs[info.jobId] = true end
+                    if info.reservedJobId ~= "" then busyEliteJobs[info.reservedJobId] = true end
+                end
+            end
+
+            local function isEliteIgnored(id)
+                if not id or id == "" or id == tostring(game.JobId) then return true end
+                if vis[id] then return true end
+                if killedBL[id] then return true end
+                if busyEliteJobs[id] then return true end
+                return false
+            end
+
+            local byJob, pool, completed = {}, {}, 0
+            local fastFound = 0
+            local br = RS:FindFirstChild("__ServerBrowser")
+            if br then
+                local totalPages = 150
+                for page = 1, totalPages do
+                    task.spawn(function()
+                        for _ = 1, 2 do
+                            if not S.Run then break end
+                            local ok, res = pcall(function() return br:InvokeServer(page) end)
+                            if ok and type(res) == "table" then
+                                for jobId, data in pairs(res) do
+                                    local id = tostring(jobId)
+                                    if not isEliteIgnored(id) and not byJob[id] then
+                                        local count = (type(data) == "table" and tonumber(data.Count)) or tonumber(data) or 99
+                                        if count >= 1 and count <= 7 then
+                                            local reg = (type(data) == "table" and tostring(data.Region or "")) or "Unknown"
+                                            local numericPing = 90
+                                            if reg:find("Sing") then
+                                                numericPing = 40
+                                            elseif reg:find("Japan") then
+                                                numericPing = 95
+                                            elseif reg:find("Germ") then
+                                                numericPing = 190
+                                            elseif reg:find("United States") or reg:find("US") then
+                                                numericPing = 235
+                                            end
+                                            byJob[id] = { id = id, cnt = count, ping = numericPing, region = reg }
+                                            if count <= 5 and numericPing <= 100 then
+                                                fastFound += 1
+                                            end
+                                        end
+                                    end
+                                end
+                                break
+                            end
+                            task.wait(0.04)
+                        end
+                        completed += 1
+                    end)
+                end
+
+                local start = os.clock()
+                repeat
+                    task.wait(0.05)
+                    local elapsed = os.clock() - start
+                until not S.Run or completed >= totalPages or elapsed >= 3.5 or (elapsed >= 0.45 and fastFound >= 12)
+
+                for _, sv in pairs(byJob) do
+                    pool[#pool + 1] = sv
+                end
+            end
+
+            if #pool == 0 and S.Run then
+                local cursor = ""
+                local pageCount = 0
+                while cursor and pageCount < 50 and S.Run do
+                    pageCount += 1
+                    local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
+                        game.PlaceId, (cursor ~= "" and "&cursor=" .. cursor or ""))
+                    local ok, res = pcall(function() return game:HttpGet(url) end)
+                    if not ok or not res then break end
+                    local okJson, data = pcall(function() return HttpService:JSONDecode(res) end)
+                    if not okJson or not data or not data.data then break end
+
+                    for _, s in ipairs(data.data) do
+                        local id = tostring(s.id)
+                        local playing = tonumber(s.playing) or 99
+                        local maxP = tonumber(s.maxPlayers) or 12
+                        if playing >= 1 and playing <= 7 and playing < maxP and not isEliteIgnored(id) and not byJob[id] then
+                            local item = {
+                                id = id,
+                                cnt = playing,
+                                ping = tonumber(s.ping) or 999,
+                                region = "Unknown"
+                            }
+                            byJob[id] = item
+                            pool[#pool + 1] = item
+                        end
+                    end
+
+                    if #pool >= 15 then break end
+                    cursor = data.nextPageCursor
+                    if not cursor or cursor == "" then break end
+                end
+            end
+
+            if not S.Run then break end
+            if #pool == 0 then
+                vis = { [tostring(game.JobId)] = os.time() }
+                Say("Chưa thấy server Elite trống, đang quét lại...")
+            else
+                local tLow, tMid, tHigh = {}, {}, {}
+                for _, sv in ipairs(pool) do
+                    if sv.ping <= 100 then
+                        tLow[#tLow + 1] = sv
+                    elseif sv.ping <= 180 then
+                        tMid[#tMid + 1] = sv
+                    else
+                        tHigh[#tHigh + 1] = sv
+                    end
+                end
+                local function shuffle(arr)
+                    for i = #arr, 2, -1 do
+                        local j = math.random(i)
+                        arr[i], arr[j] = arr[j], arr[i]
+                    end
+                end
+                shuffle(tLow)
+                shuffle(tMid)
+                shuffle(tHigh)
+                pool = {}
+                for _, group in ipairs({ tLow, tMid, tHigh }) do
+                    for _, sv in ipairs(group) do
+                        pool[#pool + 1] = sv
+                    end
+                end
+
+                for i = 1, math.min(#pool, 8) do
+                    if not S.Run then break end
+                    local sv = pool[i]
+                    if sv.id ~= "" and sv.id ~= tostring(game.JobId) then
+                        local rosterNow = ReadEliteRoster()
+                        local killedNow = ReadEliteKilledBL()
+                        local conflict = killedNow[sv.id] == true
+                        if not conflict then
+                            for uid, info in pairs(rosterNow) do
+                                if uid ~= myUid and (info.jobId == sv.id or info.reservedJobId == sv.id) then
+                                    conflict = true
+                                    break
+                                end
+                            end
+                        end
+
+                        if not conflict then
+                            local ts = os.time()
+                            rosterNow[myUid] = {
+                                userId = myUid,
+                                name = LP.Name,
+                                jobId = "",
+                                reservedJobId = sv.id,
+                                reserveTime = ts,
+                                joined = ts,
+                                time = ts,
+                                state = "reserving"
+                            }
+                            WriteEliteRoster(rosterNow)
+                            -- Khóa kiểm tra chéo 0.08s chống 2 acc Elite đặt trùng cùng thời điểm
+                            task.wait(0.08)
+                            local verifyRoster = ReadEliteRoster()
+                            local wonLock = (verifyRoster[myUid] and verifyRoster[myUid].reservedJobId == sv.id)
+                            if wonLock then
+                                for uid, info in pairs(verifyRoster) do
+                                    if uid ~= myUid and (info.jobId == sv.id or info.reservedJobId == sv.id) then
+                                        local otherTs = info.reserveTime > 0 and info.reserveTime or info.joined
+                                        if not IsHigherPriority(ts, myUid, otherTs, uid) then
+                                            wonLock = false
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+
+                            if wonLock then
+                                S.farmStatus = FormatEliteAccStatus(verifyRoster)
+                                vis[sv.id] = os.time()
+                                Say(("Đặt trước SV Elite %s (%d/7 người, ~%dms)"):format(sv.id:sub(1, 8), sv.cnt, sv.ping))
+                                TeleportToJob(sv.id)
+                                task.wait(2.2)
+                            elseif verifyRoster[myUid] then
+                                verifyRoster[myUid] = nil
+                                WriteEliteRoster(verifyRoster)
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.25)
+        end
+    end)
+end
+
+local function CheckEliteAntiColocation()
+    local jid = tostring(game.JobId)
+    local myUid = tostring(LP.UserId)
+    local now = os.time()
+    local roster = ReadEliteRoster()
+
+    if S.EliteAntiJob ~= jid then
+        S.EliteAntiJob = jid
+        local myEntry = roster[myUid]
+        if myEntry and (myEntry.jobId == jid or myEntry.reservedJobId == jid) and myEntry.joined then
+            S.EliteAntiJoined = myEntry.joined
+        else
+            S.EliteAntiJoined = now
+        end
+        S.EliteLastHB = 0
+    end
+
+    local myJoined = S.EliteAntiJoined or now
+
+    -- 1. Kiểm tra trùng server trong elite_roster.json (acc vào trước ở lại, acc vào sau hop né)
+    for uid, info in pairs(roster) do
+        if uid ~= myUid and info.jobId == jid then
+            if not IsHigherPriority(myJoined, myUid, info.joined, uid) then
+                HopLowElite(("Trùng server Elite với %s -> Hop Low né"):format(
+                    tostring(info.name ~= "" and info.name or uid)
+                ))
+                return true
+            end
+        end
+    end
+
+    -- 2. Kiểm tra nếu server này nằm trong blacklist 15p đã kill Elite (và không thấy Elite sống)
+    local killedBL = ReadEliteKilledBL()
+    if killedBL[jid] and not Find(ELITE) then
+        HopLowElite("Server đã kill Elite (Blacklist 15p) -> Hop Low")
+        return true
+    end
+
+    -- 3. Ghi xác nhận giữ slot server Elite (heartbeat mỗi 2s)
+    if os.clock() - (S.EliteLastHB or 0) >= 2.0 then
+        S.EliteLastHB = os.clock()
+        roster[myUid] = {
+            userId = myUid,
+            name = LP.Name,
+            jobId = jid,
+            reservedJobId = "",
+            reserveTime = 0,
+            joined = myJoined,
+            time = now,
+            state = "active"
+        }
+        WriteEliteRoster(roster)
+    end
+    S.farmStatus = FormatEliteAccStatus(roster)
+
+    -- 4. Kiểm tra thực tế trong server nếu có acc Elite khác đang đứng cùng server
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= LP then
+            local plUid = tostring(pl.UserId)
+            local altInfo = roster[plUid]
+            if altInfo and not IsHigherPriority(myJoined, myUid, altInfo.joined, plUid) then
+                HopLowElite(("Nhường server Elite cho acc vào trước %s -> Hop Low né"):format(pl.Name))
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 local function Hop(dest, over)
     if not S.Run then return end
     local isGuitar = over and over.GuitarEnabled
     if not EscapeZones(isGuitar and Sea() == 2 and P.Ship or nil) then return end
     local key = (dest or "") .. HttpService:JSONEncode(over or {})
     if G._RKHop == game.JobId then
-        if G._RKD ~= key then HopLow("Đổi mục tiêu RealKidHop -> Hop Low refresh") end
+        if G._RKD ~= key then
+            HopLow("Đổi mục tiêu RealKidHop -> Hop Low refresh")
+            return
+        end
+        if S.RK and G._RKHopStart then
+            local elapsed = os.clock() - G._RKHopStart
+            if dest == "Dough King" and elapsed >= 1200 then
+                HopLow("Chạy RealKidHop tìm Dough King quá 20 phút vẫn ở trong server -> Hop Low ngẫu nhiên")
+            elseif (dest == "Pirate Raid" or dest == "Soul Reaper" or dest == "Cake Queen") and elapsed >= 300 then
+                HopLow(("Chạy RealKidHop tìm %s quá 5 phút vẫn ở trong server -> Hop Low ngẫu nhiên"):format(dest))
+            end
+        end
         return
     end
     local targetLbl = dest or (isGuitar and "Skull Guitar" or "Custom")
     LogHopReason("RealKidHop: Chạy tìm " .. tostring(targetLbl))
     G._RKHop, G._RKD, G._RKLbl, S.RK = game.JobId, key, targetLbl, S.cur
+    G._RKHopStart, G._RKHopDest = os.clock(), tostring(dest or "")
     Say("Đang chạy RealKidHop tìm: " .. tostring(G._RKLbl))
     local cfg = {}
     for k, v in pairs(BASE) do cfg[k] = v end
@@ -1324,8 +1968,17 @@ local function Main(over, desc)
     if S.RK then return HopLow("Đổi từ RealKidHop sang Main -> Hop Low") end
     local isEcto = over and over.AutoFarmMaterialSkullGuitar and Sea() == 2
     if not EscapeZones(isEcto and P.Ship or nil) then return end
-    if G._RKMain == game.JobId then S.Main = true Say(desc or "Đang chạy RealKid Main") return end
+    local cfgKey = HttpService:JSONEncode(over or {})
+    if G._RKMain == game.JobId then
+        if G._RKMainCfg and G._RKMainCfg ~= cfgKey then
+            return HopLow("Đổi cấu hình RealKid Main -> Hop Low refresh")
+        end
+        S.Main = true
+        Say(desc or "Đang chạy RealKid Main")
+        return
+    end
     G._RKMain = game.JobId
+    G._RKMainCfg = cfgKey
     local cfg = HttpService:JSONDecode(MAIN_BASE)
     for k, v in pairs(over or {}) do cfg[k] = v end
     pcall(function() makefolder("RealKidHub") makefolder("RealKidHub/save2") end)
@@ -1577,11 +2230,26 @@ end
 
 local function Yama()
     S.noAttack = false
+    ReleaseServerClaim()
     if not Need(3) then return end
-    if S.RK then return HopLow("Đang ở bước Yama -> Hop Low refresh") end
+    if S.RK then return HopLowElite("Đang ở bước Yama -> Hop Low Elite refresh") end
+
+    local jid = tostring(game.JobId)
     local k = Kills()
+    if S.EliteKillsJob ~= jid then
+        S.EliteKillsJob = jid
+        S.EliteStartKills = k
+        S.EliteSeenInJob = false
+    elseif k > (S.EliteStartKills or k) then
+        -- Số kill Elite tăng lên -> vừa kill xong Elite ở server này -> Blacklist 15 phút (900s)
+        S.EliteStartKills = k
+        BlacklistEliteServer(jid, ELITE_BL_TTL)
+    end
+
     S.cur = ("Yama (%d/30)"):format(k)
     if k >= 30 then
+        ReleaseEliteClaim()
+        S.farmStatus = nil
         local r = Root()
         if not r then return end
         if (r.Position - P.Katana).Magnitude > 25 then Go(P.Katana, nil, "Đang tới chỗ rút kiếm Yama") return end
@@ -1595,11 +2263,27 @@ local function Yama()
         end
         return
     end
+
+    if CheckEliteAntiColocation() then return end
+
     local m, r, h, live, pos = Find(ELITE)
     if not m then
-        HopLow("Elite đã mất hoặc không có trong server -> Hop Low")
+        if S.EliteSeenInJob then
+            BlacklistEliteServer(jid, ELITE_BL_TTL)
+            HopLowElite("Đã kill xong Elite -> Blacklist SV 15p & Hop Low")
+        else
+            HopLowElite("Không có Elite trong server -> Hop Low")
+        end
         return
     end
+
+    S.EliteSeenInJob = true
+    if h and h.Health <= 0 then
+        BlacklistEliteServer(jid, ELITE_BL_TTL)
+        HopLowElite("Đã kill Elite -> Blacklist SV 15p & Hop Low")
+        return
+    end
+
     local hasQ, qTxt = HasActiveQuest()
     local isEliteQ = hasQ and (qTxt:find("diablo", 1, true) or qTxt:find("deandre", 1, true) or qTxt:find("urban", 1, true))
     if not isEliteQ and os.clock() - eT > 1.5 then
@@ -1613,7 +2297,8 @@ local function Yama()
         Go(pos, function()
             local em, _, _, lv, p = Find(ELITE)
             if not em then
-                HopLow("Elite biến mất khi đang bay -> Hop Low")
+                BlacklistEliteServer(jid, ELITE_BL_TTL)
+                HopLowElite("Elite đã bị kill / biến mất -> Blacklist SV 15p & Hop Low")
                 return true
             end
             return lv or (p ~= nil and (p - lastP).Magnitude > 35)
@@ -1624,7 +2309,8 @@ local function Yama()
         Go(pt, function()
             local em, _, _, lv, p = Find(ELITE)
             if not em then
-                HopLow("Elite biến mất khi đang tuần tra -> Hop Low")
+                BlacklistEliteServer(jid, ELITE_BL_TTL)
+                HopLowElite("Elite đã bị kill / biến mất -> Blacklist SV 15p & Hop Low")
                 return true
             end
             return lv or (p ~= nil and p.Magnitude > 50)
@@ -1658,14 +2344,43 @@ local function Fractal()
     end
 end
 
+local function EquipOpportunisticMasterySword()
+    if Has("Yama") and Mas("Yama") < 350 then
+        Bag("Yama", true)
+        return "Yama", Mas("Yama")
+    end
+    if Has("Tushita") and Mas("Tushita") < 350 then
+        Bag("Tushita", true)
+        return "Tushita", Mas("Tushita")
+    end
+    return nil, 0
+end
+
 local function SGT()
     S.noAttack = false
     local ecto, df, bones = Cnt("Ectoplasm"), Cnt("Dark Fragment"), math.max(Cnt("Bones"), Cnt("Bone"))
     S.sgtStatus = string.format(" [SGT NL: Ecto %d/250 | DF %d/1 | Bones %d/500]", ecto, df, bones)
     Say()
 
+    if df < 1 and Sea() == 2 and Boss(DARKBEARD, P.Dark) then return end
+
+    if ecto < 250 then
+        if S.RK then
+            return HopLow("Chuyển sang farm Ectoplasm -> Hop Low né SV", "Ectoplasm")
+        end
+        if not Need(2) then return end
+        S.farmStatus = FormatFarmAccStatus()
+        if CheckAntiColocation(P.Ship, "Ectoplasm") then return end
+        local opSw, opMas = EquipOpportunisticMasterySword()
+        local ectoDesc = opSw
+            and ("Đang farm Ectoplasm: %d/250 [Tranh thủ Mas %s: %d/350]"):format(ecto, opSw, opMas)
+            or ("Đang farm Ectoplasm: %d/250"):format(ecto)
+        return Main({ AutoFarmMaterialSkullGuitar = true, weapon_choice = "Sword", AutoRandomBones = false }, ectoDesc)
+    end
+
     if df < 1 and ecto >= 250 then
-        if G._RKHop == game.JobId and G._RKLbl == "Skull Guitar" then
+        if S.Main or (G._RKHop == game.JobId and G._RKLbl == "Skull Guitar") then
+            ReleaseServerClaim()
             return HopLow("Đã đủ 250 Ectoplasm -> Hop Low refresh tìm Darkbeard")
         end
         if not Need(2) then return end
@@ -1673,14 +2388,26 @@ local function SGT()
         Search("Darkbeard", P.Dark, DARKBEARD)
         return
     end
-    if df < 1 and Sea() == 2 and Boss(DARKBEARD, P.Dark) then return end
-    if ecto < 250 then
-        S.farmStatus = FormatFarmAccStatus()
-        if Sea() == 2 and (S.RK or S.Main) then
-            if CheckAntiColocation(P.Ship, "Ectoplasm") then return end
+
+    if bones < 500 then
+        if S.RK then
+            return HopLow("Chuyển sang farm Bones -> Hop Low né SV", "Bones")
         end
+        if not Need(3) then return end
+        S.farmStatus = FormatFarmAccStatus()
+        if CheckAntiColocation(P.Haunted, "Bones") then return end
+        local opSw, opMas = EquipOpportunisticMasterySword()
+        local bonesDesc = opSw
+            and ("Đang farm Bones: %d/500 [Tranh thủ Mas %s: %d/350]"):format(bones, opSw, opMas)
+            or ("Đang farm Bones: %d/500"):format(bones)
+        return Main({ auto_farm_general = true, selected_farm_target = "Bones", weapon_choice = "Sword", AutoRandomBones = false }, bonesDesc)
     end
+
     if ecto >= 250 and df >= 1 and bones >= 500 then
+        if S.Main then
+            ReleaseServerClaim()
+            return HopLow("Đã đủ 500 Bones -> Hop Low tiếp tục làm Skull Guitar")
+        end
         local frags = GetDataNum("Fragments")
         if frags < 5000 then
             S.sgtStatus = string.format(" [SGT Frag: %d/5000]", frags)
@@ -1811,112 +2538,198 @@ local function QS(v)
     return nil, math.min(math.max(v, 0), 3)
 end
 
-local hellTried, hellCount, inHell = {}, 0, false
+local dimState = {}
 local function Dim(n)
     local d = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild(n)
     local sp, r = d and d:FindFirstChild("Spawn"), Root()
     if not (sp and r and (r.Position - sp.Position).Magnitude <= 1500) then
-        if n == "HellDimension" and inHell then
-            table.clear(hellTried)
-            hellCount = 0
-            inHell = false
+        if dimState[n] then
+            dimState[n] = nil
+        end
+        if S.inDim == n then
+            S.inDim, S.dimPair, S.isDimBlacklisted, S.onDimAttack = nil, nil, nil, nil
         end
         return false
     end
     S.noAttack = false
 
-    local function HasDimMobs()
-        for _, m in ipairs(workspace.Enemies:GetChildren()) do
-            local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart")
-            if h and p and h.Health > 0 and (p.Position - sp.Position).Magnitude <= 800 then
-                return true
-            end
-        end
-        return false
+    local st = dimState[n]
+    if not st then
+        st = { tried = {}, count = 0, blacklist = {}, track = {} }
+        dimState[n] = st
     end
 
-    if Farm(sp.Position, 800, "Đang diệt quái trong " .. n) then return true end
-
-    if n == "HellDimension" then
-        inHell = true
-        if hellCount < 3 then
-            local bestP, bestPos, bestDist = nil, nil, math.huge
-            for _, x in ipairs(d:GetDescendants()) do
-                if x:IsA("ProximityPrompt") and x.Enabled and not hellTried[x] then
-                    local okP, piv = pcall(function() return x.Parent:GetPivot() end)
-                    local pos = okP and piv and piv.Position
-                    if pos then
-                        local dist = (r.Position - pos).Magnitude
-                        if dist < bestDist then
-                            bestP, bestPos, bestDist = x, pos, dist
-                        end
-                    end
-                end
-            end
-            if bestP and bestPos then
-                if Go(bestPos, HasDimMobs, ("HellDimension: Đang tới đuốc (%d/3)"):format(hellCount + 1)) then
-                    r = Root()
-                    if r and (r.Position - bestPos).Magnitude <= 25 then
-                        bestP.HoldDuration = 0
-                        pcall(fireproximityprompt, bestP)
-                        hellTried[bestP] = true
-                        hellCount += 1
-                        Say(("HellDimension: Đã thắp đuốc %d/3, chờ quái (1s)..."):format(hellCount))
-                        local t0 = os.clock()
-                        while S.Run and os.clock() - t0 < 1 do
-                            if HasDimMobs() then break end
-                            task.wait(0.1)
-                        end
-                    end
-                end
-                return true
-            end
-        end
-
-        local e = d:FindFirstChild("Exit")
-        if e then
-            local pos = e:GetPivot().Position
-            Say("HellDimension: Đã qua 3 đuốc không có quái -> Đang tới cửa ra...")
-            if Go(pos, HasDimMobs, "HellDimension: Đang tới cửa ra") then
-                r = Root()
-                if r and S.Run then
-                    Float(false)
-                    r.CFrame = CF(pos)
-                    task.wait(0.8)
-                    if S.Run then Float(true) end
-                end
-            end
-        end
-
-        r = Root()
-        if r and (r.Position - sp.Position).Magnitude <= 1500 and not HasDimMobs() then
-            Say("HellDimension: Chưa ra được cửa -> Làm lại 1 vòng 3 đuốc...")
-            table.clear(hellTried)
-            hellCount = 0
-        else
-            table.clear(hellTried)
-            hellCount = 0
-            inHell = false
+    local function IsBlacklisted(m)
+        local exp = st.blacklist[m]
+        if not exp then return false end
+        if os.clock() >= exp then
+            st.blacklist[m] = nil
+            st.track[m] = nil
+            return false
         end
         return true
     end
 
-    for _, x in ipairs(d:GetDescendants()) do
-        if x:IsA("ProximityPrompt") and x.Enabled then
-            if Go(x.Parent:GetPivot().Position, nil, "Đang thắp đuốc trong " .. n) then
-                x.HoldDuration = 0
-                pcall(fireproximityprompt, x)
-                task.wait(0.4)
+    local function GetValidDimMobs()
+        local list = {}
+        local cr = Root()
+        for _, m in ipairs(workspace.Enemies:GetChildren()) do
+            local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart")
+            if h and p and h.Health > 0 and not IsBlacklisted(m) and (p.Position - sp.Position).Magnitude <= 800 then
+                local dist = cr and (p.Position - cr.Position).Magnitude or 0
+                list[#list + 1] = { m = m, h = h, p = p, d = dist }
+            end
+        end
+        table.sort(list, function(a, b) return a.d < b.d end)
+        return list
+    end
+
+    local function HasValidDimMobs()
+        return #GetValidDimMobs() > 0
+    end
+
+    local function GetMinBlacklistRem()
+        local now, minRem = os.clock(), nil
+        for m, exp in pairs(st.blacklist) do
+            if m and m.Parent then
+                local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart")
+                if h and p and h.Health > 0 and (p.Position - sp.Position).Magnitude <= 800 then
+                    local rem = exp - now
+                    if rem > 0 and (not minRem or rem < minRem) then
+                        minRem = rem
+                    end
+                else
+                    st.blacklist[m] = nil
+                    st.track[m] = nil
+                end
+            else
+                st.blacklist[m] = nil
+                st.track[m] = nil
+            end
+        end
+        return minRem
+    end
+
+    S.inDim = n
+    S.isDimBlacklisted = IsBlacklisted
+    S.onDimAttack = function(targets)
+        local now = os.clock()
+        for _, item in ipairs(targets) do
+            local m = item.m
+            local h = m and m:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 and not IsBlacklisted(m) then
+                local tr = st.track[m]
+                if not tr then
+                    tr = { startHp = h.Health, hits = 0, lastHitT = 0, confirmed = false }
+                    st.track[m] = tr
+                end
+                if h.Health < tr.startHp - 0.1 then
+                    tr.confirmed = true
+                    tr.startHp = h.Health
+                    tr.hits = 0
+                elseif not tr.confirmed then
+                    if now - tr.lastHitT >= 0.25 then
+                        tr.hits += 1
+                        tr.lastHitT = now
+                    end
+                    if tr.hits >= 3 and (now - tr.lastHitT) >= 0.22 then
+                        st.blacklist[m] = now + 30
+                        st.track[m] = nil
+                    end
+                end
+            end
+        end
+    end
+
+    local function EngageDimMobs(mobs)
+        if not mobs or #mobs == 0 then return false end
+        local pair = { mobs[1].m }
+        if mobs[2] then pair[2] = mobs[2].m end
+        S.dimPair = pair
+        Fight(mobs[1].m, mobs[1].p)
+        pcall(Attack)
+        return true
+    end
+
+    local curMobs = GetValidDimMobs()
+    if #curMobs > 0 then
+        return EngageDimMobs(curMobs)
+    end
+    S.dimPair = nil
+
+    if st.count < 3 then
+        r = Root()
+        local bestP, bestPos, bestDist = nil, nil, math.huge
+        for _, x in ipairs(d:GetDescendants()) do
+            if x:IsA("ProximityPrompt") and x.Enabled and not st.tried[x] then
+                local okP, piv = pcall(function() return x.Parent:GetPivot() end)
+                local pos = okP and piv and piv.Position
+                if pos and r then
+                    local dist = (r.Position - pos).Magnitude
+                    if dist < bestDist then
+                        bestP, bestPos, bestDist = x, pos, dist
+                    end
+                end
+            end
+        end
+        if bestP and bestPos then
+            if Go(bestPos, HasValidDimMobs, ("%s: Đang tới đuốc (%d/3)"):format(n, st.count + 1)) then
+                r = Root()
+                if r and (r.Position - bestPos).Magnitude <= 25 then
+                    bestP.HoldDuration = 0
+                    pcall(fireproximityprompt, bestP)
+                    st.tried[bestP] = true
+                    st.count += 1
+                    Float(true)
+                    r.CFrame = CF(r.Position + V3(0, 22, 0))
+                    r.AssemblyLinearVelocity = V3()
+                    Say(("%s: Đã bật đuốc %d/3, check quái ngay..."):format(n, st.count))
+                    local t0 = os.clock()
+                    while S.Run and os.clock() - t0 < 0.65 do
+                        local spawned = GetValidDimMobs()
+                        if #spawned > 0 then
+                            return EngageDimMobs(spawned)
+                        end
+                        task.wait(0.03)
+                    end
+                end
             end
             return true
         end
     end
+
     local e = d:FindFirstChild("Exit")
     if e then
         local pos = e:GetPivot().Position
-        Go(pos, nil, "Đang thoát khỏi " .. n)
-        r = Root()
-        if r and S.Run then Float(false) r.CFrame = CF(pos) task.wait(0.5) if S.Run then Float(true) end end
+        Say(n .. ": Đã qua 3 đuốc -> Đang tới cửa ra...")
+        if Go(pos, HasValidDimMobs, n .. ": Đang tới cửa ra") then
+            r = Root()
+            if r and S.Run then
+                Float(false)
+                r.CFrame = CF(pos)
+                task.wait(0.8)
+                if S.Run then Float(true) end
+            end
+        end
+    end
+
+    r = Root()
+    if r and (r.Position - sp.Position).Magnitude <= 1500 then
+        local mobsAfter = GetValidDimMobs()
+        if #mobsAfter > 0 then
+            return EngageDimMobs(mobsAfter)
+        end
+        local remBl = GetMinBlacklistRem()
+        if remBl then
+            Go(sp.Position + V3(0, 60, 0), HasValidDimMobs, ("%s: Đợi hết blacklist quái (%.0fs)..."):format(n, remBl))
+        else
+            Say(n .. ": Chưa ra được cửa -> Làm lại 1 vòng 3 đuốc...")
+            table.clear(st.tried)
+            st.count = 0
+        end
+    else
+        dimState[n] = nil
+        S.inDim, S.dimPair, S.isDimBlacklisted, S.onDimAttack = nil, nil, nil, nil
     end
     return true
 end
@@ -2068,7 +2881,11 @@ end
 
 local function T2()
     S.noAttack = false
-    if not Farm(P.RaidChk, 2200, nil, RAID_BLACKLIST) then Search("Pirate Raid", P.Raid, nil, RaidMobs) end
+    if Farm(P.RaidChk, 2200, nil, RAID_BLACKLIST) then
+        if S.RK then S.RK = nil end
+    else
+        Search("Pirate Raid", P.Raid, nil, RaidMobs)
+    end
 end
 
 local function T3()
@@ -2118,7 +2935,7 @@ local function CDK()
         local needSw = (y < 350) and "Yama" or "Tushita"
         Bag(needSw, true)
         if CheckAntiColocation(P.Haunted, "Bones/Mastery") then return end
-        return Main({ auto_farm_general = true, weapon_choice = "Sword" }, ("Đang farm Mastery (%s): Yama %d/350 | Tushita %d/350"):format(needSw, y, t))
+        return Main({ auto_farm_general = true, selected_farm_target = "Bones", weapon_choice = "Sword", AutoRandomBones = true }, ("Đang farm Mastery (%s): Yama %d/350 | Tushita %d/350"):format(needSw, y, t))
     end
     S.farmStatus = nil
     local E, Gd = Poll()
@@ -2210,9 +3027,13 @@ local function Step()
     S.target, S.cdkStatus, S.farmStatus, S.sgtStatus = nil, nil, nil, nil
     if not EnsureSwordStat() then return end
     local cf = G.AutoConfig
-    if (cf.GetMM and not Has("Valkyrie Helm")) or (cf.GetCDK and not Has("Tushita")) then return Indra() end
+    if (cf.GetMM and not Has("Valkyrie Helm")) or (cf.GetCDK and not Has("Tushita")) then
+        if ReleaseEliteClaim then pcall(ReleaseEliteClaim) end
+        return Indra()
+    end
     for _, s in ipairs(STEPS) do
         if G.AutoConfig[s[1]] and not Has(s[2]) then
+            if s[2] ~= "Yama" and ReleaseEliteClaim then pcall(ReleaseEliteClaim) end
             if S.RK and S.RK ~= s[2] and not (s[2] == "Cursed Dual Katana" and tostring(S.RK):sub(1, 6) == "CDK - ") then
                 return HopLow("Đã xong " .. tostring(S.RK) .. " -> Hop Low qua " .. s[2])
             end
@@ -2223,6 +3044,7 @@ local function Step()
     end
     S.noAttack = false
     ReleaseServerClaim()
+    if ReleaseEliteClaim then pcall(ReleaseEliteClaim) end
     S.cur = "HOÀN TẤT"
     Say("Đã lấy đủ toàn bộ vật phẩm!")
 end

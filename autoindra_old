@@ -1,1 +1,1543 @@
 
+-- AUTO INDRA (Haki acc + Clone accs) | tween speed 190 | smart portal | escape Cursed Ship & Submerged Island | sync qua file IndraSync/
+repeat task.wait() until game:IsLoaded()
+local G = getgenv()
+if G._Indra and G._Indra.Run then pcall(G._Indra.Stop) task.wait(0.3) end
+
+local S = {
+    Run = true,
+    Done = false,
+    act = "Khởi tạo",
+    joinTime = os.time(),
+    spawnClock = os.clock(),
+    lastJob = tostring(game.JobId)
+}
+G._Indra = S
+
+local HAKI_ACCS = {
+    ["znwfhkjbc"] = true,
+    ["akvqxrmpt"] = true,
+}
+local SPEED, DIR = 190, "IndraSync"
+
+local function Svc(n) return game:GetService(n) end
+local Players, RS, TS, HS, CS, RunS, TelS = Svc("Players"), Svc("ReplicatedStorage"), Svc("TweenService"), Svc("HttpService"), Svc("CollectionService"), Svc("RunService"), Svc("TeleportService")
+local LP = Players.LocalPlayer
+local V3, CF = Vector3.new, CFrame.new
+
+local function IsHakiName(name)
+    return HAKI_ACCS[tostring(name or ""):lower()] == true
+end
+
+local isHaki = IsHakiName(LP.Name)
+pcall(makefolder, DIR)
+
+local P = {
+    Castle  = V3(-5085.24, 314.52, -3156.28),
+    Spot    = V3(-4995.32, 314.55, -3008.93),
+    Detect  = V3(-5563.5, 312.4, -2662.6),
+    Hydra   = V3(5404.4, 1006.8, 506.2),
+    Torch   = V3(5713.2, 41.9, 255.3),
+    Longma  = V3(-10238.88, 389.79, -9549.79),
+    Ship    = V3(909.51, 125.37, 32864.02),
+    ShipOut = V3(-6508.55810546875, 89.03500366210938, -132.83999633789062),
+    Sub     = V3(11279.25, -2138.93, 9873.44),
+    SubTp   = V3(11425.38, -2154.73, 9729.36),
+}
+local PADS = {
+    { "Red",    V3(-5414.4, 309.8, -2212.5), 287 },
+    { "Winter", V3(-5420.2, 1084.9, -2666.8), 292 },
+    { "Snow",   V3(-4971.5, 331.5, -3720),   277 }
+}
+local PORTALS = {
+    { V3(-5059.82, 326.79, -3192.29), V3(-12463.6, 386.62, -7566.08), V3(-5085.24, 314.55, -3156.2), V3(-12463.6, 374.91, -7550.23) },
+    { V3(-5027.03, 326.79, -3206.7),  V3(5650.95, 1025.57, -350.38),  V3(-5085.24, 314.55, -3156.2), V3(5661.53, 1013.36, -334.96) },
+}
+local EDGES = {}
+for _, p in ipairs(PORTALS) do
+    EDGES[#EDGES + 1] = { g = p[1], e = p[2], rq = p[4] }
+    EDGES[#EDGES + 1] = { g = p[2], e = p[1], rq = p[3] }
+end
+local INDRA = { "rip_indra" }
+
+-- ============ helpers ============
+local function Inv(...)
+    local r = RS:FindFirstChild("Remotes")
+    local c = (r and r:FindFirstChild("CommF_")) or RS:FindFirstChild("CommF_")
+    if c then
+        local ok, res = pcall(c.InvokeServer, c, ...)
+        if ok then return res end
+    end
+end
+
+local function Root()
+    local c = LP.Character
+    return c and c:FindFirstChild("HumanoidRootPart"), c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function Say(a)
+    if a then S.act = a end
+end
+
+local SEA = {
+    [2753915549] = 1,
+    [4442272183] = 2,
+    [79091703265657] = 2,
+    [7449423635] = 3,
+    [100117331123089] = 3
+}
+local function Sea()
+    return SEA[game.PlaceId] or 0
+end
+
+local EscapeZones
+
+local function Need(n)
+    if Sea() == n then return true end
+    if EscapeZones and not EscapeZones() then return false end
+    Say("Đang chuyển Sea " .. n .. "...")
+    Inv(n == 3 and "TravelZou" or n == 2 and "TravelDressrosa" or "TravelMain")
+    task.wait(5)
+end
+
+local inv, invT = {}, 0
+local function K(s) return (tostring(s or ""):gsub(" %[.-%]", ""):lower():gsub("%W", "")) end
+
+local function Items()
+    if os.clock() - invT > 3 then
+        invT = os.clock()
+        local n = {}
+        pcall(function()
+            local m = RS:WaitForChild("ItemReplicationService", 3)
+            local IR, KEYS, ID = require(m), require(m.KEYS), require(RS.Economy.ItemId)
+            local t0 = os.clock()
+            while not IR.IsInitialized and os.clock() - t0 < 5 do task.wait(0.2) end
+            for _, it in pairs(IR:GetItems(KEYS.QUANTITY)) do
+                if (tonumber(it.Value) or 0) > 0 then
+                    pcall(function()
+                        local d = ID.getDataFromId(it.ItemId):unwrap()
+                        for _, nm in ipairs({ d.StorageKey, d.DisplayName, d.Name }) do
+                            if nm then n[K(nm)] = true end
+                        end
+                    end)
+                end
+            end
+        end)
+        for _, i in pairs(Inv("getInventory") or {}) do
+            if type(i) == "table" and i.Name then n[K(i.Name)] = true end
+        end
+        if next(n) then inv = n end
+    end
+    return inv
+end
+
+local function InBag(n)
+    local c = LP.Character
+    local bp = LP:FindFirstChild("Backpack")
+    return (bp and bp:FindFirstChild(n)) or (c and c:FindFirstChild(n))
+end
+
+local function Has(n)
+    if n == "God's Chalice" or n == "Holy Torch" then
+        return InBag(n) ~= nil
+    end
+    return Items()[K(n)] or (InBag(n) ~= nil)
+end
+
+local function HasTool(pl, n)
+    if not pl then return false end
+    return (pl.Character and pl.Character:FindFirstChild(n) ~= nil)
+        or (pl:FindFirstChild("Backpack") and pl.Backpack:FindFirstChild(n) ~= nil)
+end
+
+-- ============ float / tween (speed 190 + chống giật về vị trí cũ 5 lần) ============
+local curTw, conn
+local function Float(on)
+    local r = Root()
+    if not r then return end
+    local b = r:FindFirstChild("AxF")
+    if on then
+        if not b then
+            b = Instance.new("BodyVelocity")
+            b.Name, b.MaxForce, b.Velocity, b.Parent = "AxF", V3(1e9, 1e9, 1e9), V3(), r
+        end
+    else
+        if b then b:Destroy() end
+        for _, p in ipairs(r.Parent:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = true end
+        end
+    end
+    S.Fly = on
+end
+
+conn = RunS.Stepped:Connect(function()
+    if S.Fly and not S.Hop and LP.Character then
+        for _, p in ipairs(LP.Character:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = false end
+        end
+    end
+end)
+
+local function Fly(pos, abort, desc)
+    if not S.Run or S.Hop then return false end
+    local r, h = Root()
+    if not r or not h or h.Health <= 0 then return false end
+    h.Sit = false
+    Float(true)
+
+    local snapCount = 0
+    local snapPos = nil
+
+    while S.Run and not S.Hop do
+        r, h = Root()
+        if not r or not h or h.Health <= 0 or (abort and abort()) then return false end
+        local d = (r.Position - pos).Magnitude
+        if d <= 15 then
+            r.CFrame = CF(pos)
+            break
+        end
+
+        local tw = TS:Create(r, TweenInfo.new(d / SPEED, Enum.EasingStyle.Linear), { CFrame = CF(pos) })
+        curTw = tw
+        tw:Play()
+
+        local lastDist = d
+        local checkT = os.clock()
+        local rubberbanded = false
+
+        while S.Run and tw.PlaybackState == Enum.PlaybackState.Playing do
+            task.wait(0.05)
+            r, h = Root()
+            if not r or not h or h.Health <= 0 or S.Hop or (abort and abort()) then
+                tw:Cancel()
+                return false
+            end
+            r.AssemblyLinearVelocity = V3()
+            local curDist = (r.Position - pos).Magnitude
+            if desc then Say(("%s (%.0fm)"):format(desc, curDist)) end
+
+            if os.clock() - checkT >= 0.22 then
+                checkT = os.clock()
+                if curDist >= lastDist - 8 then
+                    if snapPos and (r.Position - snapPos).Magnitude < 45 then
+                        snapCount = snapCount + 1
+                    else
+                        snapPos = r.Position
+                        snapCount = 1
+                    end
+
+                    if snapCount >= 5 then
+                        tw:Cancel()
+                        Float(false)
+                        Say("Bị giật vị trí 5 lần -> Dừng 1s về Verified Spot...")
+                        task.wait(1)
+                        snapCount = 0
+                        snapPos = nil
+                        Float(true)
+                        rubberbanded = true
+                        break
+                    end
+                elseif curDist < lastDist - 25 then
+                    snapCount = 0
+                end
+                lastDist = curDist
+            end
+        end
+
+        if not rubberbanded then
+            r = Root()
+            if S.Run and r and (r.Position - pos).Magnitude <= 25 then
+                r.CFrame = CF(pos)
+            end
+            break
+        end
+    end
+    return S.Run
+end
+
+-- Thoát khỏi Cursed Ship (Sea 2) và Submerged Island (Sea 3) trước khi Tween hoặc chuyển Sea
+EscapeZones = function(targetPos, abort)
+    local r = Root()
+    if not r or not S.Run or S.Hop then return false end
+
+    -- Sea 2: Đang ở trong Cursed Ship (bán kính 4000 stud quanh 909.51, 125.37, 32864.02)
+    if Sea() == 2 and (r.Position - P.Ship).Magnitude <= 4000 then
+        if not targetPos or (targetPos - P.Ship).Magnitude > 4000 then
+            if Fly(P.Ship, abort, "Đang tới cửa rời Cursed Ship") then
+                pcall(function()
+                    local v = (type(vector) == "table" and type(vector.create) == "function")
+                        and vector.create(-6508.55810546875, 89.03500366210938, -132.83999633789062)
+                        or P.ShipOut
+                    RS:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("requestEntrance", v)
+                end)
+                task.wait(1.2)
+            else
+                return false
+            end
+        end
+    end
+
+    -- Sea 3: Đang ở dưới Submerged Island (bán kính 3000 stud quanh 11279.25, -2138.93, 9873.44)
+    r = Root()
+    if r and Sea() == 3 and (r.Position - P.Sub).Magnitude <= 3000 then
+        if not targetPos or (targetPos - P.Sub).Magnitude > 3000 then
+            if Fly(P.SubTp, abort, "Đang ra tàu ngầm rời Submerged Island") then
+                pcall(function()
+                    RS:WaitForChild("Modules"):WaitForChild("Net"):WaitForChild("RF/SubmarineTransportation"):InvokeServer("InitiateTeleport", "Tiki Outpost")
+                end)
+                task.wait(1.5)
+            else
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
+local function Go(pos, abort, desc)
+    if not S.Run or S.Hop then return false end
+    if not EscapeZones(pos, abort) then return false end
+    for _ = 1, 2 do
+        local r = Root()
+        if not r or not S.Run or (abort and abort()) then return false end
+        local direct = (r.Position - pos).Magnitude
+        if direct < 1200 or Sea() ~= 3 or not Has("Valkyrie Helm") then break end
+        local best, bt = nil, direct - 600
+        for _, u in ipairs(EDGES) do
+            local d1 = (r.Position - u.g).Magnitude + (u.e - pos).Magnitude
+            if d1 < bt then best, bt = u, d1 end
+            for _, v in ipairs(EDGES) do
+                local d2 = (r.Position - u.g).Magnitude + (u.e - v.g).Magnitude + (v.e - pos).Magnitude
+                if d2 < bt then best, bt = u, d2 end
+            end
+        end
+        if not best then break end
+        if not Fly(best.g + V3(0, 2, 0), abort, "Vào cổng gần nhất") then return false end
+        for _ = 1, 5 do
+            local c = Root()
+            if not S.Run or not c or (c.Position - best.g).Magnitude > 250 then break end
+            Float(false)
+            c.CFrame = CF(best.g)
+            Inv("requestEntrance", best.rq)
+            Inv("requestEntrance", best.e)
+            task.wait(0.25)
+        end
+        if S.Run then Float(true) end
+    end
+    return Fly(pos, abort, desc or "Đang di chuyển")
+end
+
+-- ============ combat (fast attack) ============
+local lastLoad = 0
+local function Equip(name)
+    local c = LP.Character
+    local h = c and c:FindFirstChildOfClass("Humanoid")
+    if not h then return end
+    if not c:FindFirstChild("HasBuso") then Inv("Buso") end
+    local t = c:FindFirstChildOfClass("Tool")
+    if name then
+        if t and t.Name == name then return t end
+        local b = LP.Backpack:FindFirstChild(name)
+        if not b and os.clock() - lastLoad > 1 then
+            lastLoad = os.clock()
+            Inv("LoadItem", name)
+            b = LP.Backpack:WaitForChild(name, 0.4)
+        end
+        if b then h:EquipTool(b) return b end
+    else
+        if t and t.ToolTip == "Melee" then return t end
+        for _, i in ipairs(LP.Backpack:GetChildren()) do
+            if i:IsA("Tool") and i.ToolTip == "Melee" then
+                h:EquipTool(i)
+                return i
+            end
+        end
+        if t and t.ToolTip == "Sword" then return t end
+        for _, i in ipairs(LP.Backpack:GetChildren()) do
+            if i:IsA("Tool") and i.ToolTip == "Sword" then
+                h:EquipTool(i)
+                return i
+            end
+        end
+    end
+    return t
+end
+
+local Net = RS:WaitForChild("Modules"):WaitForChild("Net")
+local _, NetM = pcall(require, Net)
+local ObfR, ObfId
+pcall(function()
+    for _, n in ipairs({ "Util", "Common", "Remotes", "Assets", "FX" }) do
+        local f = RS:FindFirstChild(n)
+        for _, c in ipairs(f and f:GetChildren() or {}) do
+            if c:IsA("RemoteEvent") and c:GetAttribute("Id") then
+                ObfR, ObfId = c, c:GetAttribute("Id")
+                return
+            end
+        end
+    end
+end)
+
+local function Attack()
+    local c = LP.Character
+    local r = c and c:FindFirstChild("HumanoidRootPart")
+    if not r or S.Hop or S.noAttack then return end
+    local tool = Equip(S.weapon)
+    local hits, main = {}, nil
+    for _, cont in ipairs({ workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters") }) do
+        for _, m in ipairs(cont and cont:GetChildren() or {}) do
+            if m ~= c and m:IsA("Model") then
+                local h, p = m:FindFirstChildOfClass("Humanoid"), m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("Head")
+                if h and p and h.Health > 0 and (r.Position - p.Position).Magnitude <= (m == S.target and 120 or 75) then
+                    hits[#hits + 1], hits[#hits + 2] = { m, p }, m
+                    main = main or m:FindFirstChild("Head") or p
+                end
+            end
+        end
+    end
+    if not main then return end
+    pcall(function()
+        NetM:RemoteEvent("RegisterAttack", true):FireServer(0)
+        NetM:RemoteEvent("RegisterHit", true):FireServer(main, hits, {}, "078da5141")
+    end)
+    pcall(function()
+        Net["RE/RegisterAttack"]:FireServer()
+        Net["RE/RegisterHit"]:FireServer(main, hits, {}, tostring(LP.UserId):sub(2, 4) .. tostring(os.clock()):sub(3, 7))
+    end)
+    if ObfR then
+        pcall(function()
+            local k = string.gsub("RE/RegisterHit", ".", function(ch)
+                return string.char(bit32.bxor(string.byte(ch), math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1))
+            end)
+            ObfR:FireServer(k, bit32.bxor(ObfId + 909090, Net.seed:InvokeServer() * 2), main, hits)
+        end)
+    end
+    if tool then pcall(function() tool:Activate() end) end
+end
+task.spawn(function() while S.Run do pcall(Attack) task.wait() end end)
+
+local function MPos(m, r)
+    if r then return r.Position end
+    local ok, cf = pcall(function() return m:GetPivot() end)
+    return ok and cf and cf.Position or nil
+end
+
+local function Find(pats)
+    for _, c in ipairs({ workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters"), workspace, RS }) do
+        for _, m in ipairs(c and c:GetChildren() or {}) do
+            if m:IsA("Model") and not Players:GetPlayerFromCharacter(m) then
+                local n = m.Name:lower()
+                for _, p in ipairs(pats) do
+                    if n:find(p, 1, true) then
+                        local h = m:FindFirstChildOfClass("Humanoid")
+                        if not h or h.Health > 0 then
+                            local r = m:FindFirstChild("HumanoidRootPart") or m:FindFirstChild("Head") or m.PrimaryPart
+                            return m, r, h, (c ~= RS and r ~= nil and h ~= nil), MPos(m, r)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function Boss(pats, at)
+    local m, r, h, live, pos = Find(pats)
+    if not m then return false end
+    if live then
+        S.target = m
+        local me = Root()
+        local p = pos + V3(0, 18, 0)
+        if me and (me.Position - p).Magnitude > 25 then
+            Go(p, function() return not m.Parent or h.Health <= 0 end, "Đang bay tới đánh " .. m.Name)
+        elseif me then
+            Say(("Đang đánh %s (%d%%)"):format(m.Name, h.MaxHealth > 0 and h.Health / h.MaxHealth * 100 or 100))
+            Float(true)
+            me.CFrame = CF(p, pos)
+            me.AssemblyLinearVelocity = V3()
+        end
+    else
+        Go(pos or at, function() local _, _, _, lv = Find(pats) return lv end, "Đang bay tới " .. m.Name)
+    end
+    return true
+end
+
+-- ============ file sync (5s heartbeat, 60s offline) & anti trùng server ============
+local ANTI_FILE = DIR .. "/anti_servers.json"
+local myFile = DIR .. "/" .. LP.Name .. ".json"
+
+local function GetAntiServers()
+    local list = {}
+    pcall(function()
+        if isfile and isfile(ANTI_FILE) then
+            local raw = readfile(ANTI_FILE)
+            local ok, data = pcall(function() return HS:JSONDecode(raw) end)
+            if ok and type(data) == "table" then list = data end
+        end
+    end)
+    local now = os.time()
+    local cleaned = {}
+    for jid, exp in pairs(list) do
+        if type(exp) == "number" and exp > now then
+            cleaned[jid] = exp
+        end
+    end
+    return cleaned
+end
+
+local function MarkServerAnti(jobId, durationSeconds)
+    if not jobId or jobId == "" then return end
+    durationSeconds = durationSeconds or 300
+    pcall(function()
+        local list = GetAntiServers()
+        list[tostring(jobId)] = os.time() + durationSeconds
+        writefile(ANTI_FILE, HS:JSONEncode(list))
+    end)
+end
+
+-- Đọc danh sách các acc đang online nội bộ máy (cập nhật trong vòng 60s)
+local function Entries()
+    local o = {}
+    local ok, fl = pcall(listfiles, DIR)
+    local now = os.time()
+    for _, f in ipairs(ok and fl or {}) do
+        local fname = f:match("[^/\\]+$") or f
+        if not fname:lower():find("anti") and not fname:lower():find("visited") and not fname:lower():find("bl") then
+            local ok2, raw = pcall(readfile, f)
+            if ok2 and raw and raw ~= "" then
+                local ok3, d = pcall(function() return HS:JSONDecode(raw) end)
+                if ok3 and type(d) == "table" and d.name then
+                    local age = now - (tonumber(d.t) or 0)
+                    if age >= -120 and age <= 60 then
+                        o[#o + 1] = d
+                    elseif age > 60 then
+                        pcall(delfile, f)
+                    end
+                end
+            end
+        end
+    end
+    return o
+end
+
+local function PadOpen(p)
+    local ok, r = pcall(function()
+        for _, d in ipairs(workspace.Map["Boat Castle"].Summoner.Circle:GetDescendants()) do
+            if d:IsA("BasePart") and (d.Position - p[2]).Magnitude < 12 then
+                local c = d.Color
+                if c.G > 0.9 and c.R < 0.1 and c.B < 0.1 then return true end
+            end
+        end
+        return false
+    end)
+    return ok and r or false
+end
+
+local function PadsAll()
+    for _, p in ipairs(PADS) do
+        if not PadOpen(p) then return false end
+    end
+    return true
+end
+
+local function Eq(id)
+    pcall(function()
+        Net["RF/ModificationFunction"]:InvokeServer({ Type = "SetEquip", IsEquipped = true, ItemId = id })
+    end)
+end
+
+local function UpdatePresence()
+    local curJob = tostring(game.JobId)
+    if S.lastJob ~= curJob then
+        S.lastJob = curJob
+        S.joinTime = os.time()
+        S.spawnClock = os.clock()
+    end
+
+    local cup = InBag("God's Chalice") ~= nil
+    if cup and not S.cupTime then
+        S.cupTime = os.time()
+    elseif not cup then
+        S.cupTime = nil
+    end
+
+    local data = {
+        name = LP.Name,
+        job = curJob,
+        t = os.time(),
+        joinTime = S.joinTime or os.time(),
+        cupTime = S.cupTime or os.time(),
+        isHaki = isHaki,
+        cup = cup,
+        ready = PadsAll(),
+        summoned = (S.sumT and (os.clock() - S.sumT < 35)) and true or false
+    }
+    pcall(writefile, myFile, HS:JSONEncode(data))
+end
+
+UpdatePresence()
+
+local function GetCupQueues()
+    local cups = {}
+    for _, e in ipairs(Entries()) do
+        if e.cup and not e.summoned and e.job and e.job ~= "" then
+            if e.job ~= tostring(game.JobId) or Players:FindFirstChild(e.name) then
+                table.insert(cups, e)
+            end
+        end
+    end
+    table.sort(cups, function(a, b)
+        local ta = tonumber(a.cupTime) or tonumber(a.t) or 0
+        local tb = tonumber(b.cupTime) or tonumber(b.t) or 0
+        return ta < tb
+    end)
+    return cups
+end
+
+local function GetNextCupServerNeedingHaki()
+    local myJob = tostring(game.JobId)
+    local readyJobs = {}
+    for _, e in ipairs(Entries()) do
+        if e.ready and e.job and e.job ~= "" then
+            readyJobs[tostring(e.job)] = true
+        end
+    end
+    for _, cq in ipairs(GetCupQueues()) do
+        local jid = tostring(cq.job or "")
+        if jid ~= "" and jid ~= myJob and not cq.ready and not readyJobs[jid] then
+            return cq
+        end
+    end
+    return nil
+end
+
+local function GetServerCupHolderFromFile()
+    local myJob = tostring(game.JobId)
+    local holders = {}
+
+    if InBag("God's Chalice") or (S.sumT and (os.clock() - S.sumT < 35)) then
+        table.insert(holders, LP.Name)
+    end
+
+    for _, e in ipairs(Entries()) do
+        if e.name ~= LP.Name and e.job == myJob and (e.cup or e.summoned) then
+            if Players:FindFirstChild(e.name) then
+                table.insert(holders, e.name)
+            end
+        end
+    end
+
+    return #holders > 0, holders
+end
+
+-- Thống kê acc online nội bộ và số acc Clone chưa nằm trong bất kỳ server Cup nào
+local function GetCupServerStats(entriesList)
+    local entries = entriesList or Entries()
+    local myJob = tostring(game.JobId)
+    local cupJobs = {}
+
+    if InBag("God's Chalice") or (S.sumT and (os.clock() - S.sumT < 35)) then
+        cupJobs[myJob] = true
+    end
+
+    for _, e in ipairs(entries) do
+        if (e.cup or e.summoned) and e.job and e.job ~= "" then
+            cupJobs[tostring(e.job)] = true
+        end
+    end
+
+    local unjoinedCount = 0
+    local unjoinedNames = {}
+    for _, e in ipairs(entries) do
+        if not e.isHaki and not IsHakiName(e.name) then
+            local eJob = tostring(e.job or "")
+            local inAnyCupServer = (eJob ~= "" and cupJobs[eJob] == true)
+                or (cupJobs[myJob] == true and Players:FindFirstChild(e.name) ~= nil)
+            if not inAnyCupServer then
+                unjoinedCount = unjoinedCount + 1
+                table.insert(unjoinedNames, e.name)
+            end
+        end
+    end
+
+    return unjoinedCount, unjoinedNames
+end
+
+local function CheckLateJoinerConflict()
+    local myJob = tostring(game.JobId)
+    local myJoin = tonumber(S.joinTime) or os.time()
+
+    for _, e in ipairs(Entries()) do
+        if e.name ~= LP.Name and not e.isHaki and not IsHakiName(e.name) and e.job == myJob and Players:FindFirstChild(e.name) then
+            local otherJoin = tonumber(e.joinTime) or 0
+            if myJoin > otherJoin or (myJoin == otherJoin and LP.Name > e.name) then
+                return true, e.name
+            end
+        end
+    end
+    return false, nil
+end
+
+local function GetBlockedJobs()
+    local blocked = {}
+    local myJob = tostring(game.JobId)
+    blocked[myJob] = true
+
+    local anti = GetAntiServers()
+    for jid, _ in pairs(anti) do
+        blocked[tostring(jid)] = true
+    end
+
+    for _, e in ipairs(Entries()) do
+        if e.name ~= LP.Name and e.job and e.job ~= "" then
+            blocked[tostring(e.job)] = true
+        end
+    end
+
+    if S.vis then
+        for jid, _ in pairs(S.vis) do
+            blocked[tostring(jid)] = true
+        end
+    end
+
+    return blocked
+end
+
+-- ============ teleport / join (chuẩn __ServerBrowser) ============
+local function TeleportToJob(JOB_ID)
+    if JOB_ID and JOB_ID ~= "" and JOB_ID ~= tostring(game.JobId) then
+        pcall(function()
+            local browser = RS:FindFirstChild("__ServerBrowser") or RS:WaitForChild("__ServerBrowser", 3)
+            if browser then
+                browser:InvokeServer("teleport", JOB_ID)
+            else
+                TelS:TeleportToPlaceInstance(game.PlaceId, JOB_ID, LP)
+            end
+        end)
+    end
+end
+
+local lastJoin = 0
+local function Join(job)
+    if not job or job == "" or job == tostring(game.JobId) then return end
+    if os.clock() - lastJoin < 4 then return end
+    lastJoin = os.clock()
+    Say("Đang join server " .. tostring(job):sub(1, 8))
+    TeleportToJob(job)
+end
+
+-- ============ QUÉT SERVER SIÊU TỐC (150 TRANG SONG SONG) ============
+local function FetchFullServers()
+    local RawServerList = {}
+    local browser = RS:FindFirstChild("__ServerBrowser")
+
+    if browser then
+        local completed = 0
+        local totalPages = 150
+        local byJob = {}
+
+        for page = 1, totalPages do
+            task.spawn(function()
+                for _ = 1, 2 do
+                    local ok, res = pcall(function() return browser:InvokeServer(page) end)
+                    if ok and type(res) == "table" then
+                        for jobId, data in pairs(res) do
+                            local id = tostring(jobId)
+                            if id ~= tostring(game.JobId) and not byJob[id] then
+                                local count = (type(data) == "table" and tonumber(data.Count)) or tonumber(data) or 1
+                                local reg = (type(data) == "table" and tostring(data.Region or "")) or "Unknown"
+
+                                local numericPing = 90
+                                if reg:find("Sing") then
+                                    numericPing = math.random(32, 48)
+                                elseif reg:find("Japan") then
+                                    numericPing = math.random(85, 110)
+                                elseif reg:find("Germ") then
+                                    numericPing = math.random(170, 210)
+                                elseif reg:find("United States") or reg:find("US") then
+                                    numericPing = math.random(210, 260)
+                                end
+
+                                byJob[id] = {
+                                    id = id,
+                                    playing = count,
+                                    max = 12,
+                                    region = reg,
+                                    ping = numericPing
+                                }
+                            end
+                        end
+                        break
+                    end
+                    task.wait(0.04)
+                end
+                completed = completed + 1
+            end)
+        end
+
+        local start = os.clock()
+        repeat task.wait(0.05) until completed >= totalPages or (os.clock() - start) >= 3.0
+
+        for _, item in pairs(byJob) do
+            table.insert(RawServerList, item)
+        end
+    end
+
+    if #RawServerList == 0 then
+        local cursor = ""
+        local pageCount = 0
+
+        while cursor and pageCount < 20 do
+            pageCount = pageCount + 1
+            local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
+                game.PlaceId, (cursor ~= "" and ("&cursor=" .. cursor) or ""))
+
+            local ok, res = pcall(function() return game:HttpGet(url) end)
+            if not ok or not res then break end
+
+            local okJson, data = pcall(function() return HS:JSONDecode(res) end)
+            if not okJson or not data or not data.data then break end
+
+            for _, s in ipairs(data.data) do
+                if tostring(s.id) ~= tostring(game.JobId) then
+                    table.insert(RawServerList, {
+                        id = tostring(s.id),
+                        playing = tonumber(s.playing) or 0,
+                        max = tonumber(s.maxPlayers) or 12,
+                        ping = tonumber(s.ping) or 999,
+                        region = "Unknown"
+                    })
+                end
+            end
+
+            cursor = data.nextPageCursor
+            if not cursor or cursor == "" then break end
+        end
+    end
+
+    return RawServerList
+end
+
+-- ============ kiểm tra cửa Tushita (CommF_:InvokeServer("TushitaProgress").OpenedDoor) ============
+local dT, dV = 0, false
+local function Door(force)
+    if dV then return true end
+    if force or os.clock() - dT > 2 then
+        dT = os.clock()
+        local p = Inv("TushitaProgress")
+        if type(p) == "table" and p.OpenedDoor == true then
+            dV = true
+        end
+    end
+    return dV
+end
+
+local function OnlyNeedLongma()
+    return Has("Valkyrie Helm") and not Has("Tushita") and Door()
+end
+
+local function HopLow(why)
+    if S.Hop or not S.Run then return end
+    S.Hop = true
+    local reason = why or "Hop"
+    if curTw then pcall(function() curTw:Cancel() end) curTw = nil end
+    pcall(Float, false)
+    Say(("[%s] Đang quét server..."):format(reason))
+
+    task.spawn(function()
+        local hopStart = os.clock()
+        S.vis = S.vis or {}
+        S.vis[tostring(game.JobId)] = true
+        MarkServerAnti(game.JobId, 300)
+
+        while S.Run and S.Hop do
+            if isHaki then
+                local nextCup = GetNextCupServerNeedingHaki()
+                if nextCup then
+                    S.Hop = false
+                    lastJoin = 0
+                    Say(("Phát hiện cup của %s -> Join thẳng!"):format(tostring(nextCup.name)))
+                    Join(nextCup.job)
+                    return
+                end
+            elseif not OnlyNeedLongma() then
+                if InBag("God's Chalice") then
+                    S.Hop = false
+                    Say("Đã có God's Chalice -> Hủy Hop!")
+                    return
+                end
+                for _, cq in ipairs(GetCupQueues()) do
+                    if cq.ready and not cq.summoned and cq.job ~= tostring(game.JobId) then
+                        S.Hop = false
+                        Say(("Server %s đã mở 3 pad -> Join ngay!"):format(tostring(cq.name)))
+                        Join(cq.job)
+                        return
+                    end
+                end
+            end
+
+            if os.clock() - hopStart > 20 then
+                S.Hop = false
+                Say("Hop quá 20s -> Reset thử lại")
+                return
+            end
+
+            local blocked = GetBlockedJobs()
+            local rawList = FetchFullServers()
+            local pool = {}
+
+            for _, s in ipairs(rawList) do
+                if not blocked[s.id] and s.playing >= 1 and s.playing <= 5 and s.playing < s.max then
+                    table.insert(pool, s)
+                end
+            end
+
+            if #pool == 0 then
+                for _, s in ipairs(rawList) do
+                    if not blocked[s.id] and s.playing >= 1 and s.playing <= 8 and s.playing < s.max then
+                        table.insert(pool, s)
+                    end
+                end
+            end
+
+            if #pool == 0 then
+                for _, s in ipairs(rawList) do
+                    if not blocked[s.id] and s.playing >= 1 and s.playing <= 10 and s.playing < s.max then
+                        table.insert(pool, s)
+                    end
+                end
+            end
+
+            if #pool == 0 then
+                Say(("[%s] Chưa lọc được server, quét lại..."):format(reason))
+                S.vis = { [tostring(game.JobId)] = true }
+                task.wait(0.5)
+            else
+                table.sort(pool, function(a, b)
+                    if a.playing ~= b.playing then return a.playing < b.playing end
+                    return a.ping < b.ping
+                end)
+
+                for i = 1, math.min(#pool, 6) do
+                    if not S.Run or not S.Hop then break end
+                    if not isHaki and not OnlyNeedLongma() and InBag("God's Chalice") then
+                        S.Hop = false
+                        return
+                    end
+                    local cand = pool[i]
+                    MarkServerAnti(cand.id, 180)
+                    S.vis[cand.id] = true
+                    Say(("[%s] -> %s (%d/%d | %dms)"):format(reason, cand.id:sub(1, 8), cand.playing, cand.max, cand.ping))
+                    TeleportToJob(cand.id)
+                    task.wait(3.5)
+                end
+            end
+        end
+    end)
+end
+
+-- ============ haki acc (znwfhkjbc & akvqxrmpt) ============
+local function EnsureHakiAura()
+    local c = LP.Character
+    if c and not c:FindFirstChild("HasBuso") then
+        Inv("Buso")
+    end
+end
+
+local function HakiStep()
+    if not Need(3) then return end
+    EnsureHakiAura()
+
+    local cupQueues = GetCupQueues()
+    local hereCup = nil
+    for _, e in ipairs(cupQueues) do
+        if e.job == tostring(game.JobId) then
+            hereCup = e
+            break
+        end
+    end
+
+    if hereCup then
+        if PadsAll() then
+            UpdatePresence()
+            local nextCup = GetNextCupServerNeedingHaki()
+            if nextCup then
+                Say(("Đủ 3 pad -> Join thẳng SV %s bật Haki"):format(tostring(nextCup.name)))
+                return Join(nextCup.job)
+            end
+            task.wait(0.8)
+            if PadsAll() then
+                nextCup = GetNextCupServerNeedingHaki()
+                if nextCup then
+                    Say(("Đủ 3 pad -> Join thẳng SV %s bật Haki"):format(tostring(nextCup.name)))
+                    return Join(nextCup.job)
+                end
+                return HopLow("Đủ 3 pad, nhường slot")
+            end
+        end
+
+        for _, p in ipairs(PADS) do
+            if not PadOpen(p) then
+                Say("Đang mở pad " .. p[1])
+                EnsureHakiAura()
+                Eq(p[3])
+                if Go(p[2] + V3(0, 3, 0), nil, "Tới pad " .. p[1]) then
+                    local r = Root()
+                    if r then
+                        Float(false)
+                        r.CFrame = CF(p[2] + V3(0, 3, 0))
+                    end
+                    local t = os.clock()
+                    repeat
+                        EnsureHakiAura()
+                        Eq(p[3])
+                        task.wait(0.35)
+                    until PadOpen(p) or os.clock() - t > 6 or not S.Run
+                end
+                if PadsAll() then
+                    UpdatePresence()
+                    local nextCup = GetNextCupServerNeedingHaki()
+                    if nextCup then
+                        Say(("Đủ 3 pad -> Join thẳng SV %s bật Haki"):format(tostring(nextCup.name)))
+                        return Join(nextCup.job)
+                    end
+                end
+                return
+            end
+        end
+        return
+    end
+
+    local nextCup = GetNextCupServerNeedingHaki()
+    if nextCup then
+        Say(("Join thẳng mở pad cho %s (%s)"):format(tostring(nextCup.name), tostring(nextCup.job):sub(1, 8)))
+        return Join(nextCup.job)
+    end
+
+    Say("Đang chờ Clone nhặt được Cup...")
+end
+
+-- ============ clone & auto chest ============
+local ch = { job = "" }
+
+local function GetChest()
+    local r = Root()
+    if not r then return nil end
+
+    local tagged = CS:GetTagged("_ChestTagged")
+    local huge = math.huge
+    local best = nil
+    local inSub = (r.Position - P.Sub).Magnitude <= 3000
+
+    for i = 1, #tagged do
+        local obj = tagged[i]
+        if obj and obj.Parent and not obj:GetAttribute("IsDisabled") and not (ch.seen and ch.seen[obj]) then
+            local hasTouch = obj:FindFirstChild("TouchInterest") or obj:FindFirstChildWhichIsA("TouchTransmitter", true)
+            if hasTouch then
+                local ok, cf = pcall(function() return obj:GetPivot() end)
+                if ok and cf then
+                    -- Bỏ qua rương dưới Submerged Island nếu nhân vật đang ở trên mặt đất
+                    if inSub or (cf.Position - P.Sub).Magnitude > 3000 then
+                        local magnitude = (cf.Position - r.Position).Magnitude
+                        if magnitude <= huge then
+                            best = obj
+                            huge = magnitude
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not best then
+        for i = 1, #tagged do
+            local obj = tagged[i]
+            if obj and obj.Parent and not obj:GetAttribute("IsDisabled") and not (ch.seen and ch.seen[obj]) then
+                local ok, cf = pcall(function() return obj:GetPivot() end)
+                if ok and cf then
+                    if inSub or (cf.Position - P.Sub).Magnitude > 3000 then
+                        local magnitude = (cf.Position - r.Position).Magnitude
+                        if magnitude <= huge then
+                            best = obj
+                            huge = magnitude
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
+local function Chest()
+    if ch.job ~= tostring(game.JobId) then
+        ch = { job = tostring(game.JobId), n = 0, t0 = os.clock(), seen = {}, emptyRetries = 0 }
+    end
+
+    local isLate, olderAcc = CheckLateJoinerConflict()
+    if isLate then
+        return HopLow("Trùng SV với " .. tostring(olderAcc))
+    end
+
+    if ch.n >= 30 or os.clock() - ch.t0 > 80 then
+        return HopLow(("Đã nhặt %d/30 chest"):format(ch.n))
+    end
+
+    local r = Root()
+    if not r then return end
+
+    local chest = GetChest()
+    if not chest then
+        ch.emptyRetries = (ch.emptyRetries or 0) + 1
+        if ch.emptyRetries <= 8 then
+            Say(("Đang quét rương (%d/8)..."):format(ch.emptyRetries))
+            task.wait(0.5)
+            return
+        end
+        return HopLow("Hết chest")
+    end
+    ch.emptyRetries = 0
+
+    local targetPos = chest:GetPivot().Position
+    local dStart = (r.Position - targetPos).Magnitude
+    Say(("Nhặt chest %d/30 (%.0fm)"):format(ch.n + 1, dStart))
+
+    Go(targetPos, function()
+        local lateNow = CheckLateJoinerConflict()
+        return lateNow
+            or not chest.Parent
+            or chest:GetAttribute("IsDisabled") == true
+            or InBag("God's Chalice") ~= nil
+    end, ("Bay tới chest %d/30"):format(ch.n + 1))
+
+    r = Root()
+    if r and chest and chest.Parent then
+        local dist = (r.Position - chest:GetPivot().Position).Magnitude
+        if dist <= 15 then
+            local now2 = tick()
+            local touchPart = chest:IsA("BasePart") and chest or (chest.PrimaryPart or chest:FindFirstChildWhichIsA("BasePart"))
+            while S.Run and chest and chest.Parent and not chest:GetAttribute("IsDisabled") and tick() - now2 < 1.1 do
+                r = Root()
+                if not r then break end
+                r.CFrame = chest:GetPivot()
+                pcall(firetouchinterest, chest, r, 0)
+                pcall(firetouchinterest, chest, r, 1)
+                if firesignal then pcall(firesignal, chest.Touched, r) end
+                if touchPart and touchPart ~= chest then
+                    pcall(firetouchinterest, touchPart, r, 0)
+                    pcall(firetouchinterest, touchPart, r, 1)
+                    if firesignal then pcall(firesignal, touchPart.Touched, r) end
+                end
+                task.wait(0.1)
+            end
+            pcall(function()
+                if not chest:GetAttribute("IsDisabled") then
+                    chest:SetAttribute("IsDisabled", true)
+                end
+            end)
+            ch.seen[chest] = true
+            ch.n = ch.n + 1
+        else
+            ch.seen[chest] = true
+        end
+    else
+        ch.seen[chest] = true
+    end
+end
+
+-- ============ elite ============
+local ELITE = { "diablo", "deandre", "urban" }
+local kT, kV, eT = 0, 0, 0
+
+local function Kills()
+    if os.clock() - kT > 4 then
+        kT = os.clock()
+        local r = Inv("EliteHunter", "Progress")
+        local parsed = type(r) == "number" and r
+            or type(r) == "string" and tonumber(r:match("%d+"))
+            or type(r) == "table" and tonumber(r.Kills or r.Progress or r[1])
+        if parsed ~= nil then kV = parsed end
+    end
+    return kV or 0
+end
+
+local function NeedElite()
+    if Has("Yama") then return false end
+    return Kills() < 30
+end
+
+local function CheckQuest(mobName)
+    local ok, res = pcall(function()
+        local quest = LP.PlayerGui.Main.Quest
+        if not quest.Visible then return false end
+        local title = quest.Container.QuestTitle.Title.Text:gsub("-", ""):lower()
+        return title:find(mobName:gsub("-", ""):lower(), 1, true) ~= nil
+    end)
+    return ok and res or false
+end
+
+local function TryElite()
+    local isLate, olderAcc = CheckLateJoinerConflict()
+    if isLate then
+        HopLow("Trùng SV với " .. tostring(olderAcc))
+        return true
+    end
+
+    local m, _, _, live, pos = Find(ELITE)
+    if m then
+        if not CheckQuest(m.Name) and os.clock() - eT > 1.5 then
+            eT = os.clock()
+            pcall(Inv, "EliteHunter")
+        end
+        Say(("Đang săn Elite: %s (%d/30)"):format(m.Name, Kills()))
+        Boss(ELITE, pos)
+        return true
+    end
+
+    return false
+end
+
+local function HuntLongma()
+    S.weapon = nil
+    if not Boss({ "longma" }, P.Longma) then
+        local r = Root()
+        if r and (r.Position - P.Longma).Magnitude > 60 then
+            Go(P.Longma, function() return Find({ "longma" }) ~= nil end, "Đang tới hang Longma")
+        else
+            return HopLow("Longma chưa spawn")
+        end
+    end
+end
+
+local function HasHakiInServer()
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if IsHakiName(pl.Name) then
+            return true
+        end
+    end
+    return false
+end
+
+local function WaitAtSpot(isHolder, serverHasCup, cupHoldersList, unjoinedCount, hakiInServer)
+    local needTushitaTorch = Has("Valkyrie Helm") and not Has("Tushita") and not Door()
+    local targetPos = P.Spot
+    local holderStr = (cupHoldersList and #cupHoldersList > 0) and table.concat(cupHoldersList, ",") or "Cup"
+    local desc
+    if isHolder then
+        desc = ("Đợi ở Sea Castle (Chưa vào SV Cup: %d acc%s)"):format(
+            unjoinedCount or 0,
+            hakiInServer and " | Chờ Haki rời SV" or ""
+        )
+    else
+        desc = "Đợi ở Sea Castle (Cup: " .. holderStr .. ")"
+    end
+
+    if not isHolder and serverHasCup and needTushitaTorch then
+        targetPos = P.Hydra
+        desc = "Đợi ở Hydra chờ Torch (Cup: " .. holderStr .. ")"
+    end
+
+    local r = Root()
+    if r and (r.Position - targetPos).Magnitude > 25 then
+        Go(targetPos, function()
+            if Find(INDRA) ~= nil then return true end
+            if isHolder then
+                local canSpawnNow = PadsAll()
+                    and not HasHakiInServer()
+                    and (#Players:GetPlayers() >= 12 or GetCupServerStats() == 0)
+                return canSpawnNow or InBag("God's Chalice") == nil
+            else
+                local hasCupNow = GetServerCupHolderFromFile()
+                return not hasCupNow
+            end
+        end, desc)
+    else
+        Say(desc .. (" [%d/12]"):format(#Players:GetPlayers()))
+    end
+end
+
+local function CloneStep()
+    if os.clock() - (S.spawnClock or 0) < 2 then
+        Say("Đang đồng bộ dữ liệu server...")
+        return
+    end
+
+    local nh, nt = not Has("Valkyrie Helm"), not Has("Tushita")
+    if not (nh or nt) then
+        Say("HOÀN TẤT")
+        return
+    end
+    if not Need(3) then return end
+
+    local doorOpened = Door()
+    local myCup = InBag("God's Chalice") ~= nil
+    local summoning = S.sumT and (os.clock() - S.sumT < 35)
+
+    -- Ưu tiên 2 (nếu đã có Valkyrie Helm và đang cầm sẵn Holy Torch trong túi thì thắp đuốc mở cửa ngay)
+    if not nh and nt and not doorOpened and InBag("Holy Torch") then
+        Say("Thắp 5 đuốc Tushita")
+        for i = 1, 5 do
+            Inv("TushitaProgress", "Torch", i)
+            task.wait(0.2)
+        end
+        Door(true)
+        return
+    end
+
+    -- Ưu tiên 3: Đã có Valkyrie Helm + đã lấy Torch (mở cửa) -> đi thẳng kill Longma
+    if not nh and nt and doorOpened and not myCup and not summoning then
+        return HuntLongma()
+    end
+
+    -- Khi Rip Indra đang xuất hiện (Thứ tự ưu tiên: Valkyrie Helm -> lấy Torch -> kill Longma)
+    if Find(INDRA) then
+        if nh then
+            Boss(INDRA, P.Castle)
+        elseif nt and not doorOpened then
+            if InBag("Holy Torch") then
+                Say("Thắp 5 đuốc Tushita")
+                for i = 1, 5 do
+                    Inv("TushitaProgress", "Torch", i)
+                    task.wait(0.2)
+                end
+                Door(true)
+            else
+                Go(P.Torch, function() return Door(true) or InBag("Holy Torch") ~= nil end, "Đi lấy Holy Torch")
+                local r = Root()
+                if r and not Door() then
+                    Float(false)
+                    r.CFrame = CF(P.Torch)
+                    task.wait(1)
+                end
+            end
+        elseif nt and doorOpened then
+            return HuntLongma()
+        else
+            Boss(INDRA, P.Castle)
+        end
+        return
+    end
+
+    -- Nếu acc này đang cầm Cup hoặc vừa summon -> tween về Sea Castle (P.Spot) để đợi
+    if myCup or summoning then
+        UpdatePresence()
+        if summoning then
+            Say("Đợi Rip Indra xuất hiện...")
+            return WaitAtSpot(true, true, { LP.Name }, 0, false)
+        end
+
+        local hakiInServer = HasHakiInServer()
+        local padsReady = PadsAll()
+        local isFullServer = (#Players:GetPlayers() >= 12)
+        local unjoinedCount = GetCupServerStats()
+
+        -- Đủ 3 pad + không có acc Haki trong server + (12/12 hoặc acc chưa vào SV Cup = 0) thì spawn
+        if padsReady and not hakiInServer and (isFullServer or unjoinedCount == 0) then
+            Equip("God's Chalice")
+            if Go(P.Detect, nil, "Tới bệ Summon Indra") then
+                local r = Root()
+                pcall(function()
+                    local d = workspace.Map["Boat Castle"].Summoner.Detection
+                    firetouchinterest(r, d, 0)
+                    firetouchinterest(r, d, 1)
+                end)
+                task.wait(1.5)
+                S.sumT = os.clock()
+                UpdatePresence()
+            end
+        else
+            WaitAtSpot(true, true, { LP.Name }, unjoinedCount, hakiInServer)
+        end
+        return
+    end
+
+    -- Nếu acc này không cầm Cup
+    local serverHasCup, cupHolders = GetServerCupHolderFromFile()
+    if serverHasCup then
+        return WaitAtSpot(false, true, cupHolders)
+    end
+
+    local readyQueues = {}
+    for _, e in ipairs(GetCupQueues()) do
+        if e.ready and not e.summoned and e.job ~= tostring(game.JobId) then
+            table.insert(readyQueues, e)
+        end
+    end
+
+    if #readyQueues > 0 then
+        Say("Join server đủ 3 pad của " .. tostring(readyQueues[1].name))
+        return Join(readyQueues[1].job)
+    end
+
+    -- 5. Săn Elite nếu chưa đủ 30/30, ngược lại tập trung nhặt Chest
+    if NeedElite() then
+        if TryElite() then return end
+    end
+
+    Chest()
+end
+
+-- Loop cập nhật file mỗi 5 giây (60s không cập nhật = offline)
+task.spawn(function()
+    while S.Run do
+        pcall(UpdatePresence)
+        task.wait(5)
+    end
+end)
+
+-- ============ UI ============
+local gui = Instance.new("ScreenGui")
+gui.Name, gui.ResetOnSpawn = "IndraGui", false
+pcall(function()
+    local par = (typeof(gethui) == "function" and gethui()) or Svc("CoreGui")
+    local old = par:FindFirstChild("IndraGui")
+    if old then old:Destroy() end
+    gui.Parent = par
+end)
+
+local f = Instance.new("Frame", gui)
+f.Size, f.Position, f.BackgroundColor3, f.BorderSizePixel, f.Active, f.Draggable =
+    UDim2.new(0, 330, 0, 222), UDim2.new(0, 12, 0.5, -111), Color3.fromRGB(20, 20, 26), 0, true, true
+Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
+local sk = Instance.new("UIStroke", f)
+sk.Color = Color3.fromRGB(55, 55, 70)
+
+local function Lbl(parent, sz, pos, txt, size, font)
+    local l = Instance.new("TextLabel", parent)
+    l.Size, l.Position, l.Text, l.TextSize, l.Font = sz, pos, txt, size, font
+    l.BackgroundTransparency, l.TextColor3, l.TextXAlignment, l.TextYAlignment, l.RichText =
+        1, Color3.fromRGB(225, 225, 235), Enum.TextXAlignment.Left, Enum.TextYAlignment.Top, true
+    return l
+end
+
+local roleTitle = isHaki and ("HAKI (" .. LP.Name .. ")") or "CLONE ACC"
+Lbl(f, UDim2.new(1, -40, 0, 24), UDim2.new(0, 10, 0, 4), "AUTO INDRA  |  " .. roleTitle, 13, Enum.Font.GothamBold)
+local body = Lbl(f, UDim2.new(1, -20, 1, -34), UDim2.new(0, 10, 0, 30), "", 12, Enum.Font.Gotham)
+
+local x = Instance.new("TextButton", f)
+x.Size, x.Position, x.Text, x.Font, x.TextSize = UDim2.new(0, 24, 0, 24), UDim2.new(1, -30, 0, 4), "X", Enum.Font.GothamBold, 12
+x.BackgroundColor3, x.TextColor3 = Color3.fromRGB(190, 45, 45), Color3.new(1, 1, 1)
+Instance.new("UICorner", x).CornerRadius = UDim.new(0, 5)
+
+local function Unload()
+    if not S.Run then return end
+    S.Run = false
+    if curTw then pcall(function() curTw:Cancel() end) end
+    pcall(function() conn:Disconnect() end)
+    pcall(Float, false)
+    pcall(delfile, myFile)
+    pcall(function() gui:Destroy() end)
+end
+S.Stop = Unload
+x.MouseButton1Click:Connect(Unload)
+
+task.spawn(function()
+    while S.Run do
+        local pd, hakiHere = {}, false
+        for _, p in ipairs(PADS) do
+            pd[#pd + 1] = ("<font color='%s'>%s</font>"):format(PadOpen(p) and "#4ade80" or "#f87171", p[1])
+        end
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if IsHakiName(pl.Name) then
+                hakiHere = true
+                break
+            end
+        end
+
+        local entries = Entries()
+        local onlineCount = #entries
+        local inThisServer = 0
+        local globalCupHolders = {}
+        local serverHasCup, localHolders = GetServerCupHolderFromFile()
+        local unjoinedCount = GetCupServerStats(entries)
+
+        for _, e in ipairs(entries) do
+            if e.job == tostring(game.JobId) then
+                inThisServer = inThisServer + 1
+            end
+            if e.cup then
+                table.insert(globalCupHolders, e.name)
+            end
+        end
+
+        local cupStatusText
+        if serverHasCup then
+            cupStatusText = ("<font color='#4ade80'>CÓ (%s)</font>"):format(table.concat(localHolders, ", "))
+        elseif #globalCupHolders > 0 then
+            cupStatusText = ("<font color='#facc15'>SV Khác (%s)</font>"):format(table.concat(globalCupHolders, ", "))
+        else
+            cupStatusText = "<font color='#f87171'>KHÔNG</font>"
+        end
+
+        local unjoinedColor = (unjoinedCount == 0) and "#4ade80" or "#facc15"
+        local unjoinedText = ("<font color='%s'><b>%d acc</b></font>"):format(unjoinedColor, unjoinedCount)
+
+        local eliteKills = Kills()
+        local eliteColor = (eliteKills >= 30 or Has("Yama")) and "#4ade80" or "#facc15"
+        local eliteText = ("<font color='%s'><b>%d/30</b></font>%s"):format(
+            eliteColor,
+            eliteKills,
+            Has("Yama") and " (Có Yama)" or ""
+        )
+
+        local hasValk = Has("Valkyrie Helm")
+        local hasTush = Has("Tushita")
+        local isDoorOpen = Door()
+
+        local valkText = hasValk and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>CHƯA</font>"
+        local tushText = hasTush and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>CHƯA</font>"
+        local doorText = isDoorOpen and "<font color='#4ade80'>ĐÃ MỞ</font>" or "<font color='#f87171'>ĐÓNG</font>"
+
+        body.Text = (
+            "Pad: %s\n" ..
+            "Valkyrie: %s | Tushita: %s | Cửa: %s\n" ..
+            "Server Cup (File): %s\n" ..
+            "Elite: %s   |   Chest SV: <b>%d/30</b>\n" ..
+            "Online Indra: <font color='#38bdf8'><b>%d acc</b></font> (Tại đây: <b>%d</b>)\n" ..
+            "Chưa vào SV Cup: %s\n" ..
+            "Players: <b>%d/12</b>   |   Haki SV: %s\n" ..
+            "<font color='#9ca3af'>%s</font>"
+        ):format(
+            table.concat(pd, " | "),
+            valkText,
+            tushText,
+            doorText,
+            cupStatusText,
+            eliteText,
+            ch.n or 0,
+            onlineCount,
+            inThisServer,
+            unjoinedText,
+            #Players:GetPlayers(),
+            hakiHere and "<font color='#4ade80'>CÓ</font>" or "<font color='#f87171'>KHÔNG</font>",
+            tostring(S.act)
+        )
+        task.wait(0.5)
+    end
+end)
+
+-- ============ main ============
+task.spawn(function()
+    while S.Run and not (LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")) do
+        if not LP.Team then Inv("SetTeam2", "Marines") end
+        task.wait(0.15)
+    end
+    S.spawnClock = os.clock()
+    Door(true)
+    while S.Run do
+        if not isHaki and Has("Valkyrie Helm") and Has("Tushita") then
+            S.Done = true
+            Say("HOÀN TẤT")
+            Unload()
+            break
+        end
+        if not S.Hop then
+            S.weapon, S.noAttack, S.target = nil, false, nil
+            local ok, e = pcall(isHaki and HakiStep or CloneStep)
+            if not ok then warn("[Indra]", e) end
+        end
+        task.wait(0.1)
+    end
+end)

